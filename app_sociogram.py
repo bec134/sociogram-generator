@@ -15,7 +15,11 @@ import zipfile
 # ─── Streamlit UI ────────────────────────────────────────────
 st.set_page_config(page_title="Sociogram Generator", layout="wide")
 st.title("\U0001F4CA Sociogram Generator")
-
+st.markdown('''
+> **ℹ️ This Sociogram Generator is based on student responses to a survey.**  
+> To access your own copy of the survey for use with your students, click here:  
+> [Google Form Template](https://docs.google.com/forms/d/16ARyYjgnF0SN-5VO3ZNriftCPjHhI94ylKUk7t8jiFk/copy)
+''')
 uploaded_file = st.file_uploader("Upload your CSV file", type=["csv"])
 
 # Load example button
