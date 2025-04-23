@@ -42,6 +42,14 @@ if not uploaded_file:
     st.info("Please upload a CSV exported from your Google Sheet.")
     st.stop()
 
+# ─── Read CSV and Normalize ───────────────────────────────────────────
+df = pd.read_csv(uploaded_file)
+name_col = df.columns[1]  # column B: "Your name"
+df[name_col] = df[name_col].astype(str).str.strip().str.title()
+for col in df.columns:
+    if any(cat in col for cat in ["Inclusive", "Helpful", "Collaborator"]):
+        df[col] = df[col].astype(str).str.strip().str.title()
+
 # ─── Read & Parse Data ────────────────────────────────────────
 df = pd.read_csv(uploaded_file)
 name_col = df.columns[1]  # column B: "Your name"
