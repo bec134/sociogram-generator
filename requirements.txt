@@ -1,0 +1,6 @@
+streamlit
+pandas
+networkx
+matplotlib
+fpdf
+python-louvain

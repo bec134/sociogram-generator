@@ -1,0 +1,6 @@
+Timestamp,Your name,Inclusive - Choice 1,Inclusive - Choice 2,Helpful - Choice 1,Helpful - Choice 2,Collaborator - Choice 1,Collaborator - Choice 2
+2025-04-01,Alice,Bob,Charlie,Eva,,David,
+2025-04-01,Bob,Charlie,,David,Alice,,
+2025-04-01,Charlie,David,,,Bob,Eva,
+2025-04-01,David,Eva,,Charlie,,Bob,Alice
+2025-04-01,Eva,Alice,Bob,,David,Charlie,
