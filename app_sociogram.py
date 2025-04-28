@@ -90,53 +90,6 @@ for _, row in df.iterrows():
 
 # ─── Graph will be built dynamically after sidebar selection ──────────────────────────────
 
-# ─── Compute Layout and Plot Graph ──────────────────────────────────
-
-# Compute node in-degrees for sizing
-in_degrees = dict(G.in_degree())
-scale = 100
-node_sizes = [(in_degrees.get(n, 0) + 1) ** 2 * scale for n in G.nodes()]
-
-# Compute layout
-pos = nx.spring_layout(G, seed=42)
-
-# Plot the graph
-fig, ax = plt.subplots(figsize=(12, 10))
-nx.draw_networkx_nodes(
-    G, pos,
-    node_size=node_sizes,
-    node_color='lightgray',
-    edgecolors='black',
-    linewidths=1
-)
-
-# Draw edges colored by category
-rads = {"Inclusive": -0.7, "Helpful": 0.0, "Collaborator": 0.7}
-for cat in categories:
-    color = categories[cat]
-    edgelist = [(u, v) for u, v, d in G.edges(data=True) if d.get("category") == cat]
-    nx.draw_networkx_edges(
-        G, pos,
-        edgelist=edgelist,
-        edge_color=color,
-        arrowstyle='-|>',
-        arrowsize=20,
-        width=2,
-        connectionstyle=f'arc3,rad={rads[cat]}'
-    )
-
-# Draw labels
-nx.draw_networkx_labels(G, pos, font_size=10)
-
-# Legend
-legend_handles = [Patch(facecolor=clr, label=cat) for cat, clr in categories.items()]
-plt.legend(handles=legend_handles, title='Nomination Type', loc='lower left')
-
-plt.title('Sociogram', fontsize=16)
-plt.axis('off')
-
-st.pyplot(fig)
-
 # ─── Add Sidebar Filters and Cluster Coloring ───────────────────────
 
 # Sidebar settings
