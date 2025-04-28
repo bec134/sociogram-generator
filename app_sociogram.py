@@ -58,6 +58,9 @@ df[name_col] = df[name_col].astype(str).str.strip().str.title()
 for col in df.columns:
     if any(cat in col for cat in ["Inclusive", "Helpful", "Collaborator"]):
         df[col] = df[col].astype(str).str.strip().str.title()
+        
+# Fix: after title casing, convert 'Nan' strings back to real NaNs
+df.replace("Nan", pd.NA, inplace=True)
 
 # ─── Build Nominations and Graph ─────────────────────────────────────
 
