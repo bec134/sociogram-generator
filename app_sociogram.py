@@ -22,6 +22,35 @@ st.markdown('''
 ''')
 uploaded_file = st.file_uploader("Upload your CSV file", type=["csv"])
 
+if st.button("📥 Load Example Data"):
+    sample_data = {
+        'Timestamp': ['2025-04-01'] * 5,
+        'Your name': ['Alice', 'Bob', 'Charlie', 'David', 'Eva'],
+        'Inclusive - Choice 1': ['Bob', 'Charlie', 'David', 'Eva', 'Alice'],
+        'Inclusive - Choice 2': ['Charlie', '', '', '', 'Bob'],
+        'Helpful - Choice 1': ['Eva', 'David', '', 'Charlie', ''],
+        'Helpful - Choice 2': ['', 'Alice', 'Bob', '', 'David'],
+        'Collaborator - Choice 1': ['David', '', 'Eva', 'Bob', 'Charlie'],
+        'Collaborator - Choice 2': ['', '', '', 'Alice', '']
+    }
+    st.session_state["sample_data"] = sample_data
+    st.success("Loaded example data. You can explore the sociogram now!")
+    st.session_state["example_loaded"] = True
+
+# ─── Read CSV and Normalize ───────────────────────────────────────────
+if uploaded_file is not None:
+    df = pd.read_csv(uploaded_file)
+elif st.session_state.get("sample_data") is not None:
+    df = pd.DataFrame(st.session_state["sample_data"])
+else:
+    st.info("Please upload a CSV exported from your Google Sheet.")
+    st.stop()
+
+name_col = df.columns[1]  # column B: "Your name"
+df[name_col] = df[name_col].astype(str).str.strip().str.title()
+for col in df.columns:
+    if any(cat in col for cat in ["Inclusive", "Helpful", "Collaborator"]):
+        df[col] = df[col].astype(str).str.strip().str.title()
 # Load example button
 if st.button("📥 Load Example Data"):
     sample_data = {
@@ -37,21 +66,6 @@ if st.button("📥 Load Example Data"):
     st.session_state["example_loaded"] = True
     st.session_state["sample_data"] = sample_data
     st.success("Loaded example data. You can explore the sociogram now!")
-    
-# ─── Read CSV and Normalize ───────────────────────────────────────────
-if uploaded_file is not None:
-    df = pd.read_csv(uploaded_file)
-elif st.session_state.get("example_loaded"):
-    df = pd.read_csv(io.StringIO(pd.DataFrame(sample_data).to_csv(index=False)))
-else:
-    st.info("Please upload a CSV exported from your Google Sheet.")
-    st.stop()
-
-name_col = df.columns[1]  # column B: "Your name"
-df[name_col] = df[name_col].astype(str).str.strip().str.title()
-for col in df.columns:
-    if any(cat in col for cat in ["Inclusive", "Helpful", "Collaborator"]):
-        df[col] = df[col].astype(str).str.strip().str.title()
 
 # ─── Read & Parse Data ────────────────────────────────────────
 df = pd.read_csv(uploaded_file)
