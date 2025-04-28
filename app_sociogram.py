@@ -58,7 +58,7 @@ df[name_col] = df[name_col].astype(str).str.strip().str.title()
 for col in df.columns:
     if any(cat in col for cat in ["Inclusive", "Helpful", "Collaborator"]):
         df[col] = df[col].astype(str).str.strip().str.title()
-        
+
 # Fix: after title casing, convert 'Nan' strings back to real NaNs
 df.replace("Nan", pd.NA, inplace=True)
 
@@ -75,7 +75,9 @@ categories = {
 edges = []
 for _, row in df.iterrows():
     source = str(row[name_col]).strip()
-if source and source.lower() != "nan":
+    if not source or source.lower() == "nan":
+        continue  # Skip rows without a valid source
+
     for cat in categories:
         for i in (1, 2):
             col = f"{cat} - Choice {i}"
@@ -86,10 +88,7 @@ if source and source.lower() != "nan":
                     if target and target.lower() != "nan":
                         edges.append((source, target, cat))
 
-# Create the directed graph
-G = nx.DiGraph()
-for u, v, cat in edges:
-    G.add_edge(u, v, category=cat)
+# ─── Graph will be built dynamically after sidebar selection ──────────────────────────────
 
 # ─── Compute Layout and Plot Graph ──────────────────────────────────
 
@@ -164,7 +163,21 @@ else:
     norm = Normalize(vmin=0, vmax=max_deg)
     node_colors = [cm.viridis(norm(in_degrees.get(n, 0))) for n in G.nodes()]
 
-# ─── Redraw Graph Based on Sidebar Settings ─────────────────────────
+# ─── Build and Redraw Graph Based on Sidebar Settings ─────────────────────────
+
+# Rebuild Graph G based on selected categories
+G = nx.DiGraph()
+for u, v, cat in edges:
+    if cat in selected_categories:
+        G.add_edge(u, v, category=cat)
+
+# Compute node in-degrees for sizing
+in_degrees = dict(G.in_degree())
+scale = 100
+node_sizes = [(in_degrees.get(n, 0) + 1) ** 2 * scale for n in G.nodes()]
+
+# Compute layout
+pos = nx.spring_layout(G, seed=42)
 
 # Replot graph with updated filters and node colors
 fig, ax = plt.subplots(figsize=(12, 10))
