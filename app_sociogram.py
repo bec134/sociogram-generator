@@ -1,5 +1,19 @@
 # app_sociogram.py
+
 import streamlit as st
+
+st.set_page_config(page_title="Sociogram Generator", layout="wide")
+st.title("📊 Sociogram Generator")
+
+st.markdown('''
+> **ℹ️ This Sociogram Generator is based on student responses to a survey.**  
+> To access your own copy of the survey for use with your students, click here:  
+> [Google Form Template](https://docs.google.com/forms/d/16ARyYjgnF0SN-5VO3ZNriftCPjHhI94ylKUk7t8jiFk/copy)
+''')
+
+
+
+# ─── Load and Normalize Data ───────────────────────────────────────
 import pandas as pd
 import networkx as nx
 import matplotlib.pyplot as plt
@@ -10,16 +24,7 @@ from fpdf import FPDF
 import community as community_louvain
 import io
 from collections import defaultdict
-import zipfile
 
-# ─── Streamlit UI ────────────────────────────────────────────
-st.set_page_config(page_title="Sociogram Generator", layout="wide")
-st.title("\U0001F4CA Sociogram Generator")
-st.markdown('''
-> **ℹ️ This Sociogram Generator is based on student responses to a survey.**  
-> To access your own copy of the survey for use with your students, click here:  
-> [Google Form Template](https://docs.google.com/forms/d/16ARyYjgnF0SN-5VO3ZNriftCPjHhI94ylKUk7t8jiFk/copy)
-''')
 uploaded_file = st.file_uploader("Upload your CSV file", type=["csv"])
 
 if st.button("📥 Load Example Data"):
@@ -37,6 +42,8 @@ if st.button("📥 Load Example Data"):
     st.success("Loaded example data. You can explore the sociogram now!")
     st.session_state["example_loaded"] = True
 
+
+
 # ─── Read CSV and Normalize ───────────────────────────────────────────
 if uploaded_file is not None:
     df = pd.read_csv(uploaded_file)
@@ -52,34 +59,17 @@ for col in df.columns:
     if any(cat in col for cat in ["Inclusive", "Helpful", "Collaborator"]):
         df[col] = df[col].astype(str).str.strip().str.title()
 
+# ─── Build Nominations and Graph ─────────────────────────────────────
 
-# ─── Read & Parse Data ────────────────────────────────────────
-df = pd.read_csv(uploaded_file)
-name_col = df.columns[1]  # column B: "Your name"
-
+# Define categories and colors
 categories = {
-    "Inclusive":    "green",
-    "Helpful":      "blue",
+    "Inclusive": "green",
+    "Helpful": "blue",
     "Collaborator": "red"
 }
 
-students = sorted(set(df[name_col].dropna().astype(str).str.strip()).union(
-    *[df[c].dropna().astype(str).str.strip() for c in df.columns if any(k in c for k in categories)]
-))
-
-with st.expander("⚙️ Advanced Settings", expanded=st.session_state.get("example_loaded", False)):
-    category_toggle = {
-        cat: st.checkbox(f"Show {cat} edges", value=True)
-        for cat in categories
-    }
-    selected = [cat for cat, show in category_toggle.items() if show]
-    is_directed = st.checkbox("Use directed graph", value=True)
-    focus_student = st.selectbox("Focus on a specific student (optional)", options=["All"] + students)
-    cluster_toggle = st.checkbox("Color nodes by group (cluster) instead of popularity", value=False)
-
-# ─── Build Edge List ──────────────────────────────────────────
+# Build edges from nominations
 edges = []
-edge_weights = {}
 for _, row in df.iterrows():
     source = str(row[name_col]).strip()
     for cat in categories:
@@ -89,28 +79,77 @@ for _, row in df.iterrows():
                 target = row[col]
                 if pd.notna(target) and str(target).strip():
                     target = str(target).strip()
-                    edge = (source, target, cat)
-                    edges.append(edge)
-                    key = (source, target, cat)
-                    edge_weights[key] = edge_weights.get(key, 0) + 1
+                    edges.append((source, target, cat))
 
-# ─── Graph Construction ───────────────────────────────────────
-G = nx.DiGraph() if is_directed else nx.Graph()
-for (u, v, cat), weight in edge_weights.items():
-    if G.has_edge(u, v):
-        G[u][v]['weight'] += weight
-    else:
-        G.add_edge(u, v, category=cat, weight=weight)
+# Create the directed graph
+G = nx.DiGraph()
+for u, v, cat in edges:
+    G.add_edge(u, v, category=cat)
 
-in_degrees = dict(G.in_degree()) if is_directed else dict(G.degree())
+# ─── Compute Layout and Plot Graph ──────────────────────────────────
+
+# Compute node in-degrees for sizing
+in_degrees = dict(G.in_degree())
 scale = 100
-node_sizes_dict = {
-    n: min((in_degrees.get(n, 0) + 1)**2 * scale, 2500) for n in G.nodes()
-}
-node_sizes = list(node_sizes_dict.values())
+node_sizes = [(in_degrees.get(n, 0) + 1) ** 2 * scale for n in G.nodes()]
 
-# Color nodes
-if cluster_toggle:
+# Compute layout
+pos = nx.spring_layout(G, seed=42)
+
+# Plot the graph
+fig, ax = plt.subplots(figsize=(12, 10))
+nx.draw_networkx_nodes(
+    G, pos,
+    node_size=node_sizes,
+    node_color='lightgray',
+    edgecolors='black',
+    linewidths=1
+)
+
+# Draw edges colored by category
+rads = {"Inclusive": -0.7, "Helpful": 0.0, "Collaborator": 0.7}
+for cat in categories:
+    color = categories[cat]
+    edgelist = [(u, v) for u, v, d in G.edges(data=True) if d.get("category") == cat]
+    nx.draw_networkx_edges(
+        G, pos,
+        edgelist=edgelist,
+        edge_color=color,
+        arrowstyle='-|>',
+        arrowsize=20,
+        width=2,
+        connectionstyle=f'arc3,rad={rads[cat]}'
+    )
+
+# Draw labels
+nx.draw_networkx_labels(G, pos, font_size=10)
+
+# Legend
+legend_handles = [Patch(facecolor=clr, label=cat) for cat, clr in categories.items()]
+plt.legend(handles=legend_handles, title='Nomination Type', loc='lower left')
+
+plt.title('Sociogram', fontsize=16)
+plt.axis('off')
+
+st.pyplot(fig)
+
+# ─── Add Sidebar Filters and Cluster Coloring ───────────────────────
+
+# Sidebar settings
+st.sidebar.header("Settings")
+selected_categories = st.sidebar.multiselect(
+    "Select nomination types to display",
+    options=list(categories.keys()),
+    default=list(categories.keys())
+)
+
+cluster_coloring = st.sidebar.checkbox(
+    "Color nodes by group (cluster) instead of popularity",
+    value=False
+)
+
+# If clustering enabled, compute communities
+if cluster_coloring:
     partition = community_louvain.best_partition(G.to_undirected())
     unique_groups = sorted(set(partition.values()))
     color_map = cm.get_cmap('tab10', len(unique_groups))
@@ -120,10 +159,10 @@ else:
     norm = Normalize(vmin=0, vmax=max_deg)
     node_colors = [cm.viridis(norm(in_degrees.get(n, 0))) for n in G.nodes()]
 
-pos = nx.spring_layout(G, seed=42)
+# ─── Redraw Graph Based on Sidebar Settings ─────────────────────────
 
-# ─── Plotting ─────────────────────────────────────────────────
-fig, ax = plt.subplots(figsize=(10, 8))
+# Replot graph with updated filters and node colors
+fig, ax = plt.subplots(figsize=(12, 10))
 nx.draw_networkx_nodes(
     G, pos,
     node_size=node_sizes,
@@ -132,145 +171,85 @@ nx.draw_networkx_nodes(
     linewidths=1
 )
 
-# Tooltips
-for node, (x, y) in pos.items():
-    count = in_degrees.get(node, 0)
-    ax.annotate(
-        f"{node}\nNominations: {count}",
-        (x, y),
-        textcoords="offset points",
-        xytext=(0, 10),
-        ha='center',
-        fontsize=8,
-        color='gray'
+# Draw only selected category edges
+for cat in selected_categories:
+    color = categories[cat]
+    edgelist = [(u, v) for u, v, d in G.edges(data=True) if d.get("category") == cat]
+    nx.draw_networkx_edges(
+        G, pos,
+        edgelist=edgelist,
+        edge_color=color,
+        arrowstyle='-|>',
+        arrowsize=20,
+        width=2,
+        connectionstyle=f'arc3,rad={rads[cat]}'
     )
 
-rads = {"Inclusive": -0.7, "Helpful": 0.0, "Collaborator": +0.7}
-for cat in selected:
-    color = categories[cat]
-    edgelist = [
-        (u, v) for u, v, d in G.edges(data=True)
-        if d.get("category") == cat and (
-            focus_student == "All" or u == focus_student or v == focus_student
-        )
-    ]
-    widths = [G[u][v]['weight'] for u, v in edgelist]
-    for (u, v), w in zip(edgelist, widths):
-        target_size = node_sizes_dict.get(v, 300)
-        arrowsize = max(30, min(80, target_size * 0.05))
-        nx.draw_networkx_edges(
-            G, pos,
-            edgelist=[(u, v)],
-            edge_color=color,
-            width=w,
-            arrowstyle='-|>' if is_directed else '-',
-            arrowsize=arrowsize,
-            connectionstyle=f'arc3,rad={rads[cat]}' if is_directed else None,
-            arrows=is_directed
-        )
+# Draw labels again
+nx.draw_networkx_labels(G, pos, font_size=10)
 
-label_pos = {k: v for k, v in pos.items() if focus_student == "All" or k == focus_student}
-nx.draw_networkx_labels(G, label_pos, font_size=10)
-
-legend_handles = [
-    Patch(facecolor=clr, label=cat)
-    for cat, clr in categories.items() if cat in selected
-]
+# Update legend
+legend_handles = [Patch(facecolor=clr, label=cat) for cat, clr in categories.items() if cat in selected_categories]
 plt.legend(handles=legend_handles, title='Nomination Type', loc='lower left')
 
-# Colorbar
-if not cluster_toggle:
-    sm = cm.ScalarMappable(cmap=cm.viridis, norm=norm)
-    sm.set_array([])
-    cbar = plt.colorbar(sm, ax=ax, shrink=0.6)
-    cbar.set_label('Number of Nominations')
-
-plt.title('Sociogram', fontsize=14)
+plt.title('Sociogram (Filtered)', fontsize=16)
 plt.axis('off')
+
 st.pyplot(fig)
 
-# ─── Sidebar Summary ──────────────────────────────────────────
-st.sidebar.title("📊 Summary")
-st.sidebar.markdown(f"**Nodes:** {len(G.nodes())}")
-st.sidebar.markdown(f"**Edges:** {len(G.edges())}")
-st.sidebar.markdown("Popularity = In-degree (number of nominations received)")
-st.sidebar.markdown("Use filters in ⚙️ Advanced Settings to explore variations.")
+# ─── Generate PDF Report ─────────────────────────────────────────────
 
-# Histogram
-fig_hist, ax_hist = plt.subplots(figsize=(2.5, 2))
-counts = list(in_degrees.values())
-ax_hist.hist(counts, bins=range(0, max(counts)+2), color='gray', edgecolor='black')
-ax_hist.set_title("Nominations Histogram", fontsize=8)
-ax_hist.set_xlabel("Nominations", fontsize=7)
-ax_hist.set_ylabel("# of Students", fontsize=7)
-ax_hist.tick_params(labelsize=6)
-st.sidebar.pyplot(fig_hist)
-
-# Reset Button
-if st.sidebar.button("🔄 Reset Filters"):
-    for key in ["example_loaded"]:
-        if key in st.session_state:
-            del st.session_state[key]
-    st.experimental_rerun()
-
-# ─── PDF Report ───────────────────────────────────────────────
 if st.button("📄 Generate PDF Report"):
-    pdf = FPDF()
-    pdf.add_page()
-    pdf.set_font("Arial", size=12)
-    pdf.cell(200, 10, txt="Sociogram Summary Report", ln=True, align='C')
+    with st.spinner("Generating PDF Report..."):
+        pdf = FPDF()
+        pdf.add_page()
+        pdf.set_font("Arial", size=12)
+        pdf.cell(200, 10, txt="Sociogram Summary Report", ln=True, align='C')
 
-    pdf.ln(10)
-    pdf.set_font("Arial", size=10)
-    pdf.cell(200, 10, txt=f"Total Students: {len(G.nodes())}", ln=True)
-    pdf.cell(200, 10, txt=f"Total Nominations: {len(G.edges())}", ln=True)
+        pdf.ln(10)
+        pdf.set_font("Arial", size=10)
+        pdf.cell(200, 10, txt=f"Total Students: {len(G.nodes())}", ln=True)
+        pdf.cell(200, 10, txt=f"Total Nominations: {len(G.edges())}", ln=True)
 
-    pdf.ln(5)
-    pdf.cell(200, 10, txt="Top 5 Most Nominated Students (Overall):", ln=True)
-    top5 = sorted(in_degrees.items(), key=lambda x: x[1], reverse=True)[:5]
-    for name, deg in top5:
-        pdf.cell(200, 10, txt=f"- {name}: {deg} nominations", ln=True)
+        pdf.ln(10)
+        pdf.cell(200, 10, txt="Top 5 Most Nominated Students:", ln=True)
+        top5 = sorted(in_degrees.items(), key=lambda x: x[1], reverse=True)[:5]
+        for name, deg in top5:
+            pdf.cell(200, 10, txt=f"- {name}: {deg} nominations", ln=True)
 
-    pdf.ln(5)
-    pdf.cell(200, 10, txt="Top 3 Most Nominated Students by Category:", ln=True)
-    for cat in categories:
-        cat_degrees = defaultdict(int)
-        for u, v, d in G.edges(data=True):
-            if d.get("category") == cat:
-                cat_degrees[v] += 1
-        top3_cat = sorted(cat_degrees.items(), key=lambda x: x[1], reverse=True)[:3]
-        pdf.cell(200, 10, txt=f"{cat}:", ln=True)
-        for name, deg in top3_cat:
-            pdf.cell(200, 10, txt=f"   - {name}: {deg} nominations", ln=True)
+        pdf.ln(10)
+        pdf.cell(200, 10, txt="Top 3 Nominated Students in Each Category:", ln=True)
+        for cat in categories:
+            nomination_counts = {}
+            for _, target, c in edges:
+                if c == cat:
+                    nomination_counts[target] = nomination_counts.get(target, 0) + 1
+            top3 = sorted(nomination_counts.items(), key=lambda x: x[1], reverse=True)[:3]
+            pdf.cell(200, 10, txt=f"{cat}:", ln=True)
+            for name, count in top3:
+                pdf.cell(200, 10, txt=f"- {name}: {count} nominations", ln=True)
 
-    if cluster_toggle:
-        group_membership = {v: [] for v in set(partition.values())}
-        for name, group in partition.items():
-            group_membership[group].append(name)
-        pdf.ln(5)
-        pdf.cell(200, 10, txt="Group (Cluster) Membership Samples:", ln=True)
-        for group, members in group_membership.items():
-            members_str = ", ".join(members[:5]) + ("..." if len(members) > 5 else "")
-            pdf.cell(200, 10, txt=f"- Group {group}: {members_str}", ln=True)
+        if cluster_coloring:
+            pdf.ln(10)
+            group_membership = {v: [] for v in set(partition.values())}
+            for name, group in partition.items():
+                group_membership[group].append(name)
+            pdf.cell(200, 10, txt="Cluster Groups:", ln=True)
+            for group, members in group_membership.items():
+                members_str = ", ".join(members[:5]) + ("..." if len(members) > 5 else "")
+                pdf.cell(200, 10, txt=f"- Group {group}: {members_str}", ln=True)
 
-        pdf.ln(5)
-        pdf.cell(200, 10, txt="Bridging Students Between Clusters:", ln=True)
+        pdf.ln(10)
+        pdf.cell(200, 10, txt="Socially Isolated Students:", ln=True)
         for n in G.nodes():
-            if n in partition:
-                neighbor_groups = set(partition.get(neigh) for neigh in G.neighbors(n))
-                if len(neighbor_groups) > 1:
-                    pdf.cell(200, 10, txt=f"- {n} (links to groups {sorted(neighbor_groups)})", ln=True)
+            if in_degrees.get(n, 0) == 0:
+                pdf.cell(200, 10, txt=f"- {n}", ln=True)
 
-    pdf.ln(5)
-    pdf.cell(200, 10, txt="Socially Isolated Students:", ln=True)
-    for n in G.nodes():
-        if in_degrees.get(n, 0) == 0:
-            pdf.cell(200, 10, txt=f"- {n}", ln=True)
-
-    pdf_output_bytes = pdf.output(dest='S').encode('latin-1')
-    st.download_button(
-        label="⬇️ Download PDF Summary",
-        data=pdf_output_bytes,
-        file_name="sociogram_summary.pdf",
-        mime="application/pdf"
-    )
+        pdf_output_bytes = pdf.output(dest='S').encode('latin-1')
+        st.download_button(
+            label="⬇️ Download PDF Summary",
+            data=pdf_output_bytes,
+            file_name="sociogram_summary.pdf",
+            mime="application/pdf"
+        )
+        st.success("✅ PDF generated successfully! Ready to download.")
