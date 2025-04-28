@@ -34,9 +34,9 @@ if st.button("📥 Load Example Data"):
         'Collaborator - Choice 1': ['David', '', 'Eva', 'Bob', 'Charlie'],
         'Collaborator - Choice 2': ['', '', '', 'Alice', '']
     }
-    uploaded_file = io.StringIO(pd.DataFrame(sample_data).to_csv(index=False))
-    st.success("Loaded example data. You can explore the sociogram now!")
     st.session_state["example_loaded"] = True
+    st.session_state["sample_data"] = sample_data
+    st.success("Loaded example data. You can explore the sociogram now!")
     
 # ─── Read CSV and Normalize ───────────────────────────────────────────
 if uploaded_file is not None:
