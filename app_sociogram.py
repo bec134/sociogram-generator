@@ -253,3 +253,34 @@ if st.button("📄 Generate PDF Report"):
             mime="application/pdf"
         )
         st.success("✅ PDF generated successfully! Ready to download.")
+
+# ─── Export Full Summary Table ──────────────────────────────────────────
+
+summary_counts = {student: {"Inclusive": 0, "Helpful": 0, "Collaborator": 0} for student in G.nodes()}
+
+for _, target, cat in edges:
+    if target in summary_counts:
+        summary_counts[target][cat] += 1
+
+summary_table = pd.DataFrame([
+    {
+        "Student": student,
+        "Total": sum(counts.values()),
+        **counts
+    }
+    for student, counts in summary_counts.items()
+])
+
+# Sort by Total nominations descending
+summary_table = summary_table.sort_values(by="Total", ascending=False)
+
+st.dataframe(summary_table)
+
+csv_export = summary_table.to_csv(index=False).encode('utf-8')
+
+st.download_button(
+    label="⬇️ Download Full Summary Table (CSV)",
+    data=csv_export,
+    file_name="sociogram_summary_table.csv",
+    mime="text/csv"
+)
