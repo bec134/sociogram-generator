@@ -75,18 +75,16 @@ categories = {
 edges = []
 for _, row in df.iterrows():
     source = str(row[name_col]).strip()
-if not source or source.lower() == "nan":
-    continue  # Skip rows without a valid source
-
-for cat in categories:
-    for i in (1, 2):
-        col = f"{cat} - Choice {i}"
-        if col in df.columns:
-            target = row[col]
-            if pd.notna(target):
-                target = str(target).strip()
-                if target and target.lower() != "nan":
-                    edges.append((source, target, cat))
+if source and source.lower() != "nan":
+    for cat in categories:
+        for i in (1, 2):
+            col = f"{cat} - Choice {i}"
+            if col in df.columns:
+                target = row[col]
+                if pd.notna(target):
+                    target = str(target).strip()
+                    if target and target.lower() != "nan":
+                        edges.append((source, target, cat))
 
 # Create the directed graph
 G = nx.DiGraph()
