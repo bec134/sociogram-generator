@@ -37,13 +37,16 @@ if st.button("📥 Load Example Data"):
     uploaded_file = io.StringIO(pd.DataFrame(sample_data).to_csv(index=False))
     st.success("Loaded example data. You can explore the sociogram now!")
     st.session_state["example_loaded"] = True
-
-if not uploaded_file:
+    
+# ─── Read CSV and Normalize ───────────────────────────────────────────
+if uploaded_file is not None:
+    df = pd.read_csv(uploaded_file)
+elif st.session_state.get("example_loaded"):
+    df = pd.read_csv(io.StringIO(pd.DataFrame(sample_data).to_csv(index=False)))
+else:
     st.info("Please upload a CSV exported from your Google Sheet.")
     st.stop()
 
-# ─── Read CSV and Normalize ───────────────────────────────────────────
-df = pd.read_csv(uploaded_file)
 name_col = df.columns[1]  # column B: "Your name"
 df[name_col] = df[name_col].astype(str).str.strip().str.title()
 for col in df.columns:
