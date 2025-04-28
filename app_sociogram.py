@@ -51,21 +51,7 @@ df[name_col] = df[name_col].astype(str).str.strip().str.title()
 for col in df.columns:
     if any(cat in col for cat in ["Inclusive", "Helpful", "Collaborator"]):
         df[col] = df[col].astype(str).str.strip().str.title()
-# Load example button
-if st.button("📥 Load Example Data"):
-    sample_data = {
-        'Timestamp': ['2025-04-01'] * 5,
-        'Your name': ['Alice', 'Bob', 'Charlie', 'David', 'Eva'],
-        'Inclusive - Choice 1': ['Bob', 'Charlie', 'David', 'Eva', 'Alice'],
-        'Inclusive - Choice 2': ['Charlie', '', '', '', 'Bob'],
-        'Helpful - Choice 1': ['Eva', 'David', '', 'Charlie', ''],
-        'Helpful - Choice 2': ['', 'Alice', 'Bob', '', 'David'],
-        'Collaborator - Choice 1': ['David', '', 'Eva', 'Bob', 'Charlie'],
-        'Collaborator - Choice 2': ['', '', '', 'Alice', '']
-    }
-    st.session_state["example_loaded"] = True
-    st.session_state["sample_data"] = sample_data
-    st.success("Loaded example data. You can explore the sociogram now!")
+
 
 # ─── Read & Parse Data ────────────────────────────────────────
 df = pd.read_csv(uploaded_file)
