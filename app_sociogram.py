@@ -13,11 +13,13 @@ from matplotlib import cm
 from matplotlib.colors import Normalize
 from matplotlib.patches import Patch
 
+import audit
 import auth
 
 # ─── Authentication ────────────────────────────────────────────────
 st.set_page_config(page_title="Sociogram Generator", layout="wide")
 current_user = auth.require_auth()
+audit.session_start()
 
 # ─── Sidebar: user identity & logout ──────────────────────────────
 with st.sidebar:
@@ -71,6 +73,7 @@ if not st.session_state.get("privacy_acknowledged"):
 uploaded_file = st.file_uploader("Upload your CSV file", type=["csv"])
 
 if st.button("📥 Load Example Data"):
+    audit.sample_data_loaded()
     sample_data = {
         'Timestamp': ['2025-04-01'] * 5,
         'Your name': ['Alice', 'Bob', 'Charlie', 'David', 'Eva'],
@@ -131,6 +134,7 @@ if uploaded_file is not None:
             f"Maximum allowed size is {MAX_UPLOAD_BYTES // 1024 // 1024} MB."
         )
         st.stop()
+    audit.file_uploaded(uploaded_file.size)
     try:
         df = pd.read_csv(uploaded_file)
     except Exception as e:
@@ -325,6 +329,10 @@ st.pyplot(fig)
 # ─── Generate PDF Report ─────────────────────────────────────────────
 
 if st.button("📄 Generate PDF Report"):
+    audit.pdf_exported(
+        student_count=len(G_filtered.nodes()),
+        categories_shown=selected_categories,
+    )
     with st.spinner("Generating PDF Report..."):
         try:
             pdf = FPDF()
@@ -417,9 +425,13 @@ st.dataframe(summary_table)
 
 csv_export = summary_table.to_csv(index=False).encode('utf-8')
 
-st.download_button(
+if st.download_button(
     label="⬇️ Download Full Summary Table (CSV)",
     data=csv_export,
     file_name="sociogram_summary_table.csv",
     mime="text/csv"
-)
+):
+    audit.csv_exported(
+        student_count=len(summary_table),
+        categories_shown=selected_categories,
+    )

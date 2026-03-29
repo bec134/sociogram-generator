@@ -1,0 +1,12 @@
+# Audit logs (local deployment only — not committed)
+audit.log
+audit.log.*
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.env
+
+# Streamlit
+.streamlit/secrets.toml
