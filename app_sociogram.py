@@ -323,54 +323,56 @@ if st.button("📄 Generate PDF Report"):
         try:
             pdf = FPDF()
             pdf.add_page()
+            # w=0 means "extend to the right margin" — correct for A4 (190mm printable)
             pdf.set_font("Arial", size=12)
-            pdf.cell(200, 10, txt="Sociogram Summary Report", ln=True, align='C')
+            pdf.cell(0, 10, txt="Sociogram Summary Report", ln=True, align='C')
 
             pdf.ln(10)
             pdf.set_font("Arial", size=10)
-            pdf.cell(200, 10, txt=f"Total Students: {len(G_filtered.nodes())}", ln=True)
-            pdf.cell(200, 10, txt=f"Total Nominations: {len(G_filtered.edges())}", ln=True)
+            pdf.cell(0, 10, txt=f"Total Students: {len(G_filtered.nodes())}", ln=True)
+            pdf.cell(0, 10, txt=f"Total Nominations: {len(G_filtered.edges())}", ln=True)
             if selected_categories != list(categories.keys()):
                 shown = ", ".join(selected_categories) if selected_categories else "none"
-                pdf.cell(200, 10, txt=f"Showing categories: {shown}", ln=True)
+                pdf.cell(0, 10, txt=f"Showing categories: {shown}", ln=True)
+
+            def _row(text: str):
+                """Write one content row, wrapping if the text is too wide."""
+                safe = text.encode("latin-1", errors="replace").decode("latin-1")
+                pdf.multi_cell(0, 10, txt=safe)
 
             pdf.ln(10)
-            pdf.cell(200, 10, txt="Top 5 Most Nominated Students:", ln=True)
+            pdf.cell(0, 10, txt="Top 5 Most Nominated Students:", ln=True)
             top5 = sorted(in_degrees_filtered.items(), key=lambda x: x[1], reverse=True)[:5]
             for name, deg in top5:
-                safe_name = str(name).encode("latin-1", errors="replace").decode("latin-1")
-                pdf.cell(200, 10, txt=f"- {safe_name}: {deg} nominations", ln=True)
+                _row(f"- {name}: {deg} nominations")
 
             pdf.ln(10)
-            pdf.cell(200, 10, txt="Top 3 Nominated Students in Each Category:", ln=True)
+            pdf.cell(0, 10, txt="Top 3 Nominated Students in Each Category:", ln=True)
             for cat in categories:
                 nomination_counts = {}
                 for _, target, c in edges:
                     if c == cat:
                         nomination_counts[target] = nomination_counts.get(target, 0) + 1
                 top3 = sorted(nomination_counts.items(), key=lambda x: x[1], reverse=True)[:3]
-                pdf.cell(200, 10, txt=f"{cat}:", ln=True)
+                pdf.cell(0, 10, txt=f"{cat}:", ln=True)
                 for name, count in top3:
-                    safe_name = str(name).encode("latin-1", errors="replace").decode("latin-1")
-                    pdf.cell(200, 10, txt=f"- {safe_name}: {count} nominations", ln=True)
+                    _row(f"- {name}: {count} nominations")
 
             if cluster_coloring and partition is not None:
                 pdf.ln(10)
                 group_membership = {v: [] for v in set(partition.values())}
                 for name, group in partition.items():
                     group_membership[group].append(name)
-                pdf.cell(200, 10, txt="Cluster Groups:", ln=True)
+                pdf.cell(0, 10, txt="Cluster Groups:", ln=True)
                 for group, members in group_membership.items():
                     members_str = ", ".join(members[:5]) + ("..." if len(members) > 5 else "")
-                    safe_str = members_str.encode("latin-1", errors="replace").decode("latin-1")
-                    pdf.cell(200, 10, txt=f"- Group {group}: {safe_str}", ln=True)
+                    _row(f"- Group {group}: {members_str}")
 
             pdf.ln(10)
-            pdf.cell(200, 10, txt="Socially Isolated Students:", ln=True)
+            pdf.cell(0, 10, txt="Socially Isolated Students:", ln=True)
             for n in G_filtered.nodes():
                 if in_degrees_filtered.get(n, 0) == 0:
-                    safe_name = str(n).encode("latin-1", errors="replace").decode("latin-1")
-                    pdf.cell(200, 10, txt=f"- {safe_name}", ln=True)
+                    _row(f"- {n}")
 
             pdf_output_bytes = pdf.output(dest='S').encode('latin-1')
             st.download_button(
