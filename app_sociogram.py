@@ -253,14 +253,29 @@ cluster_coloring = st.sidebar.checkbox(
     value=False
 )
 
-# If clustering enabled, compute communities
+# ─── Build Filtered Graph ─────────────────────────────────────────────
+# Rebuild the graph using only the selected categories so that node
+# sizes, in-degrees, clustering, and stats all reflect what is shown.
+
+G_filtered = nx.DiGraph()
+G_filtered.add_nodes_from(G.nodes())  # preserve all nodes (avoid layout jumps)
+for u, v, cat in edges:
+    if cat in selected_categories:
+        G_filtered.add_edge(u, v, category=cat)
+
+in_degrees_filtered = dict(G_filtered.in_degree())
+node_sizes_filtered = [
+    (in_degrees_filtered.get(n, 0) + 1) ** 2 * scale for n in G_filtered.nodes()
+]
+
+# If clustering enabled, compute communities on the filtered graph
 partition = None
 if cluster_coloring:
     try:
-        partition = community_louvain.best_partition(G.to_undirected())
+        partition = community_louvain.best_partition(G_filtered.to_undirected())
         unique_groups = sorted(set(partition.values()))
         color_map = cm.get_cmap('tab10', len(unique_groups))
-        node_colors = [color_map(partition[n]) for n in G.nodes()]
+        node_colors = [color_map(partition[n]) for n in G_filtered.nodes()]
     except Exception as e:
         st.warning(
             f"Cluster detection could not be completed ({e}). "
@@ -268,28 +283,27 @@ if cluster_coloring:
         )
         cluster_coloring = False
 if not cluster_coloring:
-    max_deg = max(in_degrees.values()) if in_degrees else 1
+    max_deg = max(in_degrees_filtered.values()) if in_degrees_filtered else 1
     norm = Normalize(vmin=0, vmax=max_deg)
-    node_colors = [cm.viridis(norm(in_degrees.get(n, 0))) for n in G.nodes()]
+    node_colors = [cm.viridis(norm(in_degrees_filtered.get(n, 0))) for n in G_filtered.nodes()]
 
 # ─── Redraw Graph Based on Sidebar Settings ─────────────────────────
 
 # Replot graph with updated filters and node colors
 fig, ax = plt.subplots(figsize=(12, 10))
 nx.draw_networkx_nodes(
-    G, pos,
-    node_size=node_sizes,
+    G_filtered, pos,
+    node_size=node_sizes_filtered,
     node_color=node_colors,
     edgecolors='black',
     linewidths=1
 )
 
-# Draw only selected category edges
 for cat in selected_categories:
     color = categories[cat]
-    edgelist = [(u, v) for u, v, d in G.edges(data=True) if d.get("category") == cat]
+    edgelist = [(u, v) for u, v, d in G_filtered.edges(data=True) if d.get("category") == cat]
     nx.draw_networkx_edges(
-        G, pos,
+        G_filtered, pos,
         edgelist=edgelist,
         edge_color=color,
         arrowstyle='-|>',
@@ -298,10 +312,8 @@ for cat in selected_categories:
         connectionstyle=f'arc3,rad={rads[cat]}'
     )
 
-# Draw labels again
-nx.draw_networkx_labels(G, pos, font_size=10)
+nx.draw_networkx_labels(G_filtered, pos, font_size=10)
 
-# Update legend
 legend_handles = [Patch(facecolor=clr, label=cat) for cat, clr in categories.items() if cat in selected_categories]
 plt.legend(handles=legend_handles, title='Nomination Type', loc='lower left')
 
@@ -322,12 +334,15 @@ if st.button("📄 Generate PDF Report"):
 
             pdf.ln(10)
             pdf.set_font("Arial", size=10)
-            pdf.cell(200, 10, txt=f"Total Students: {len(G.nodes())}", ln=True)
-            pdf.cell(200, 10, txt=f"Total Nominations: {len(G.edges())}", ln=True)
+            pdf.cell(200, 10, txt=f"Total Students: {len(G_filtered.nodes())}", ln=True)
+            pdf.cell(200, 10, txt=f"Total Nominations: {len(G_filtered.edges())}", ln=True)
+            if selected_categories != list(categories.keys()):
+                shown = ", ".join(selected_categories) if selected_categories else "none"
+                pdf.cell(200, 10, txt=f"Showing categories: {shown}", ln=True)
 
             pdf.ln(10)
             pdf.cell(200, 10, txt="Top 5 Most Nominated Students:", ln=True)
-            top5 = sorted(in_degrees.items(), key=lambda x: x[1], reverse=True)[:5]
+            top5 = sorted(in_degrees_filtered.items(), key=lambda x: x[1], reverse=True)[:5]
             for name, deg in top5:
                 safe_name = str(name).encode("latin-1", errors="replace").decode("latin-1")
                 pdf.cell(200, 10, txt=f"- {safe_name}: {deg} nominations", ln=True)
@@ -358,8 +373,8 @@ if st.button("📄 Generate PDF Report"):
 
             pdf.ln(10)
             pdf.cell(200, 10, txt="Socially Isolated Students:", ln=True)
-            for n in G.nodes():
-                if in_degrees.get(n, 0) == 0:
+            for n in G_filtered.nodes():
+                if in_degrees_filtered.get(n, 0) == 0:
                     safe_name = str(n).encode("latin-1", errors="replace").decode("latin-1")
                     pdf.cell(200, 10, txt=f"- {safe_name}", ln=True)
 
@@ -380,10 +395,10 @@ if st.button("📄 Generate PDF Report"):
 
 # ─── Export Full Summary Table ──────────────────────────────────────────
 
-summary_counts = {student: {"Inclusive": 0, "Helpful": 0, "Collaborator": 0} for student in G.nodes()}
+summary_counts = {student: {"Inclusive": 0, "Helpful": 0, "Collaborator": 0} for student in G_filtered.nodes()}
 
 for _, target, cat in edges:
-    if target in summary_counts:
+    if cat in selected_categories and target in summary_counts:
         summary_counts[target][cat] += 1
 
 summary_table = pd.DataFrame([
