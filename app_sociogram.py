@@ -254,12 +254,20 @@ cluster_coloring = st.sidebar.checkbox(
 )
 
 # If clustering enabled, compute communities
+partition = None
 if cluster_coloring:
-    partition = community_louvain.best_partition(G.to_undirected())
-    unique_groups = sorted(set(partition.values()))
-    color_map = cm.get_cmap('tab10', len(unique_groups))
-    node_colors = [color_map(partition[n]) for n in G.nodes()]
-else:
+    try:
+        partition = community_louvain.best_partition(G.to_undirected())
+        unique_groups = sorted(set(partition.values()))
+        color_map = cm.get_cmap('tab10', len(unique_groups))
+        node_colors = [color_map(partition[n]) for n in G.nodes()]
+    except Exception as e:
+        st.warning(
+            f"Cluster detection could not be completed ({e}). "
+            "This can happen when the graph has no edges. Falling back to popularity colouring."
+        )
+        cluster_coloring = False
+if not cluster_coloring:
     max_deg = max(in_degrees.values()) if in_degrees else 1
     norm = Normalize(vmin=0, vmax=max_deg)
     node_colors = [cm.viridis(norm(in_degrees.get(n, 0))) for n in G.nodes()]
@@ -306,58 +314,69 @@ st.pyplot(fig)
 
 if st.button("📄 Generate PDF Report"):
     with st.spinner("Generating PDF Report..."):
-        pdf = FPDF()
-        pdf.add_page()
-        pdf.set_font("Arial", size=12)
-        pdf.cell(200, 10, txt="Sociogram Summary Report", ln=True, align='C')
+        try:
+            pdf = FPDF()
+            pdf.add_page()
+            pdf.set_font("Arial", size=12)
+            pdf.cell(200, 10, txt="Sociogram Summary Report", ln=True, align='C')
 
-        pdf.ln(10)
-        pdf.set_font("Arial", size=10)
-        pdf.cell(200, 10, txt=f"Total Students: {len(G.nodes())}", ln=True)
-        pdf.cell(200, 10, txt=f"Total Nominations: {len(G.edges())}", ln=True)
-
-        pdf.ln(10)
-        pdf.cell(200, 10, txt="Top 5 Most Nominated Students:", ln=True)
-        top5 = sorted(in_degrees.items(), key=lambda x: x[1], reverse=True)[:5]
-        for name, deg in top5:
-            pdf.cell(200, 10, txt=f"- {name}: {deg} nominations", ln=True)
-
-        pdf.ln(10)
-        pdf.cell(200, 10, txt="Top 3 Nominated Students in Each Category:", ln=True)
-        for cat in categories:
-            nomination_counts = {}
-            for _, target, c in edges:
-                if c == cat:
-                    nomination_counts[target] = nomination_counts.get(target, 0) + 1
-            top3 = sorted(nomination_counts.items(), key=lambda x: x[1], reverse=True)[:3]
-            pdf.cell(200, 10, txt=f"{cat}:", ln=True)
-            for name, count in top3:
-                pdf.cell(200, 10, txt=f"- {name}: {count} nominations", ln=True)
-
-        if cluster_coloring:
             pdf.ln(10)
-            group_membership = {v: [] for v in set(partition.values())}
-            for name, group in partition.items():
-                group_membership[group].append(name)
-            pdf.cell(200, 10, txt="Cluster Groups:", ln=True)
-            for group, members in group_membership.items():
-                members_str = ", ".join(members[:5]) + ("..." if len(members) > 5 else "")
-                pdf.cell(200, 10, txt=f"- Group {group}: {members_str}", ln=True)
+            pdf.set_font("Arial", size=10)
+            pdf.cell(200, 10, txt=f"Total Students: {len(G.nodes())}", ln=True)
+            pdf.cell(200, 10, txt=f"Total Nominations: {len(G.edges())}", ln=True)
 
-        pdf.ln(10)
-        pdf.cell(200, 10, txt="Socially Isolated Students:", ln=True)
-        for n in G.nodes():
-            if in_degrees.get(n, 0) == 0:
-                pdf.cell(200, 10, txt=f"- {n}", ln=True)
+            pdf.ln(10)
+            pdf.cell(200, 10, txt="Top 5 Most Nominated Students:", ln=True)
+            top5 = sorted(in_degrees.items(), key=lambda x: x[1], reverse=True)[:5]
+            for name, deg in top5:
+                safe_name = str(name).encode("latin-1", errors="replace").decode("latin-1")
+                pdf.cell(200, 10, txt=f"- {safe_name}: {deg} nominations", ln=True)
 
-        pdf_output_bytes = pdf.output(dest='S').encode('latin-1')
-        st.download_button(
-            label="⬇️ Download PDF Summary",
-            data=pdf_output_bytes,
-            file_name="sociogram_summary.pdf",
-            mime="application/pdf"
-        )
-        st.success("✅ PDF generated successfully! Ready to download.")
+            pdf.ln(10)
+            pdf.cell(200, 10, txt="Top 3 Nominated Students in Each Category:", ln=True)
+            for cat in categories:
+                nomination_counts = {}
+                for _, target, c in edges:
+                    if c == cat:
+                        nomination_counts[target] = nomination_counts.get(target, 0) + 1
+                top3 = sorted(nomination_counts.items(), key=lambda x: x[1], reverse=True)[:3]
+                pdf.cell(200, 10, txt=f"{cat}:", ln=True)
+                for name, count in top3:
+                    safe_name = str(name).encode("latin-1", errors="replace").decode("latin-1")
+                    pdf.cell(200, 10, txt=f"- {safe_name}: {count} nominations", ln=True)
+
+            if cluster_coloring and partition is not None:
+                pdf.ln(10)
+                group_membership = {v: [] for v in set(partition.values())}
+                for name, group in partition.items():
+                    group_membership[group].append(name)
+                pdf.cell(200, 10, txt="Cluster Groups:", ln=True)
+                for group, members in group_membership.items():
+                    members_str = ", ".join(members[:5]) + ("..." if len(members) > 5 else "")
+                    safe_str = members_str.encode("latin-1", errors="replace").decode("latin-1")
+                    pdf.cell(200, 10, txt=f"- Group {group}: {safe_str}", ln=True)
+
+            pdf.ln(10)
+            pdf.cell(200, 10, txt="Socially Isolated Students:", ln=True)
+            for n in G.nodes():
+                if in_degrees.get(n, 0) == 0:
+                    safe_name = str(n).encode("latin-1", errors="replace").decode("latin-1")
+                    pdf.cell(200, 10, txt=f"- {safe_name}", ln=True)
+
+            pdf_output_bytes = pdf.output(dest='S').encode('latin-1')
+            st.download_button(
+                label="⬇️ Download PDF Summary",
+                data=pdf_output_bytes,
+                file_name="sociogram_summary.pdf",
+                mime="application/pdf"
+            )
+            st.success("✅ PDF generated successfully! Ready to download.")
+        except Exception as e:
+            st.error(
+                f"PDF generation failed: {e}\n\n"
+                "Please try again. If the problem persists, check that student names "
+                "do not contain unsupported special characters."
+            )
 
 # ─── Export Full Summary Table ──────────────────────────────────────────
 
