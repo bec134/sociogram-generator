@@ -1,7 +1,6 @@
 # app_sociogram.py
 
 import io
-from collections import defaultdict
 
 import community as community_louvain
 import matplotlib.pyplot as plt
@@ -16,12 +15,11 @@ from matplotlib.patches import Patch
 import audit
 import auth
 
-# ─── Authentication ────────────────────────────────────────────────
+# ─── Auth & session ────────────────────────────────────────────────
 st.set_page_config(page_title="Sociogram Generator", layout="wide")
 current_user = auth.require_auth()
 audit.session_start()
 
-# ─── Sidebar: user identity & logout ──────────────────────────────
 with st.sidebar:
     st.markdown("---")
     st.markdown(f"**Signed in as**")
@@ -74,7 +72,7 @@ uploaded_file = st.file_uploader("Upload your CSV file", type=["csv"])
 
 if st.button("📥 Load Example Data"):
     audit.sample_data_loaded()
-    sample_data = {
+    st.session_state["sample_data"] = {
         'Timestamp': ['2025-04-01'] * 5,
         'Your name': ['Alice', 'Bob', 'Charlie', 'David', 'Eva'],
         'Inclusive - Choice 1': ['Bob', 'Charlie', 'David', 'Eva', 'Alice'],
@@ -84,13 +82,17 @@ if st.button("📥 Load Example Data"):
         'Collaborator - Choice 1': ['David', '', 'Eva', 'Bob', 'Charlie'],
         'Collaborator - Choice 2': ['', '', '', 'Alice', '']
     }
-    st.session_state["sample_data"] = sample_data
     st.success("Loaded example data. You can explore the sociogram now!")
-    st.session_state["example_loaded"] = True
 
+# ─── Nomination categories ────────────────────────────────────────────
 
+categories = {
+    "Inclusive": "green",
+    "Helpful": "blue",
+    "Collaborator": "red"
+}
 
-# ─── Read CSV and Normalize ───────────────────────────────────────────
+# ─── Input validation ─────────────────────────────────────────────────
 
 def _validate_csv(dataframe: pd.DataFrame) -> list[str]:
     """
@@ -108,15 +110,13 @@ def _validate_csv(dataframe: pd.DataFrame) -> list[str]:
         )
         return errors
 
-    # Check the name column is present and non-empty
     name_column = dataframe.columns[1]
     if dataframe[name_column].dropna().eq("").all():
         errors.append(f'Column "{name_column}" (student names) appears to be empty.')
 
-    # Check at least one nomination column exists
     nomination_cols = [
         c for c in dataframe.columns
-        if any(cat in c for cat in ["Inclusive", "Helpful", "Collaborator"])
+        if any(cat in c for cat in categories)
     ]
     if not nomination_cols:
         errors.append(
@@ -127,6 +127,55 @@ def _validate_csv(dataframe: pd.DataFrame) -> list[str]:
     return errors
 
 
+# ─── Cached data pipeline ─────────────────────────────────────────────
+# Streamlit reruns the entire script on every widget interaction. These
+# functions are cached so that CSV parsing, graph layout, and community
+# detection only rerun when their inputs change — not on every rerun.
+
+@st.cache_data(show_spinner=False)
+def _load_and_build(file_bytes: bytes) -> list[tuple]:
+    """Parse, normalise, and extract nomination edges from raw CSV bytes."""
+    df = pd.read_csv(io.BytesIO(file_bytes))
+    name_candidates = [c for c in df.columns if "name" in c.lower()]
+    name_col = name_candidates[0] if name_candidates else df.columns[1]
+    df[name_col] = df[name_col].astype(str).str.strip().str.title()
+    for col in df.columns:
+        if any(cat in col for cat in categories):
+            df[col] = df[col].astype(str).str.strip().str.title()
+    df.replace("Nan", pd.NA, inplace=True)
+    edges = []
+    for _, row in df.iterrows():
+        source = str(row[name_col]).strip()
+        for cat in categories:
+            for i in (1, 2):
+                col_name = f"{cat} - Choice {i}"
+                if col_name in df.columns:
+                    target = row[col_name]
+                    if pd.notna(target) and str(target).strip():
+                        edges.append((source, str(target).strip(), cat))
+    return edges
+
+
+@st.cache_data(show_spinner=False)
+def _spring_layout(edge_tuples: tuple) -> dict:
+    """Compute spring layout. O(n²) — cached per unique graph structure."""
+    G = nx.DiGraph()
+    for u, v, cat in edge_tuples:
+        G.add_edge(u, v, category=cat)
+    return nx.spring_layout(G, seed=42)
+
+
+@st.cache_data(show_spinner=False)
+def _louvain_partition(filtered_edge_tuples: tuple) -> dict:
+    """Compute Louvain community partition. Cached per unique filtered graph."""
+    G_f = nx.DiGraph()
+    for u, v, cat in filtered_edge_tuples:
+        G_f.add_edge(u, v, category=cat)
+    return community_louvain.best_partition(G_f.to_undirected())
+
+
+# ─── Load data ────────────────────────────────────────────────────────
+
 if uploaded_file is not None:
     if uploaded_file.size > MAX_UPLOAD_BYTES:
         st.error(
@@ -135,12 +184,13 @@ if uploaded_file is not None:
         )
         st.stop()
     audit.file_uploaded(uploaded_file.size)
+    file_bytes = uploaded_file.getvalue()
     try:
-        df = pd.read_csv(uploaded_file)
+        raw_df = pd.read_csv(io.BytesIO(file_bytes))
     except Exception as e:
         st.error(f"Could not read the CSV file: {e}")
         st.stop()
-    validation_errors = _validate_csv(df)
+    validation_errors = _validate_csv(raw_df)
     if validation_errors:
         st.error("**The uploaded file has the following issues:**")
         for err in validation_errors:
@@ -150,52 +200,22 @@ if uploaded_file is not None:
             "and that the column headers haven't been renamed."
         )
         st.stop()
+    edges = _load_and_build(file_bytes)
 elif st.session_state.get("sample_data") is not None:
-    df = pd.DataFrame(st.session_state["sample_data"])
+    # Convert sample dict to CSV bytes so it goes through the same cached pipeline
+    sample_bytes = pd.DataFrame(st.session_state["sample_data"]).to_csv(index=False).encode()
+    edges = _load_and_build(sample_bytes)
 else:
     st.info("Please upload a CSV exported from your Google Sheet.")
     st.stop()
 
-# Identify name column by header name, falling back to position
-_name_col_candidates = [c for c in df.columns if "name" in c.lower()]
-name_col = _name_col_candidates[0] if _name_col_candidates else df.columns[1]
+# ─── Build full graph ─────────────────────────────────────────────────
 
-df[name_col] = df[name_col].astype(str).str.strip().str.title()
-for col in df.columns:
-    if any(cat in col for cat in ["Inclusive", "Helpful", "Collaborator"]):
-        df[col] = df[col].astype(str).str.strip().str.title()
-
-# Fix: after title casing, convert 'Nan' strings back to real NaNs
-df.replace("Nan", pd.NA, inplace=True)
-
-# ─── Build Nominations and Graph ─────────────────────────────────────
-
-# Define categories and colors
-categories = {
-    "Inclusive": "green",
-    "Helpful": "blue",
-    "Collaborator": "red"
-}
-
-# Build edges from nominations
-edges = []
-for _, row in df.iterrows():
-    source = str(row[name_col]).strip()
-    for cat in categories:
-        for i in (1, 2):
-            col = f"{cat} - Choice {i}"
-            if col in df.columns:
-                target = row[col]
-                if pd.notna(target) and str(target).strip():
-                    target = str(target).strip()
-                    edges.append((source, target, cat))
-
-# Create the directed graph
 G = nx.DiGraph()
 for u, v, cat in edges:
     G.add_edge(u, v, category=cat)
 
-# ─── Shared graph drawing helper ─────────────────────────────────────
+# ─── Graph drawing helper ─────────────────────────────────────────────
 
 # Edge curvature offsets keep the three category arrows visually separated.
 rads = {"Inclusive": -0.7, "Helpful": 0.0, "Collaborator": 0.7}
@@ -254,17 +274,16 @@ def _draw_sociogram(
     return fig
 
 
-# ─── Compute Layout and draw overview graph ──────────────────────────
+# ─── Overview graph ───────────────────────────────────────────────────
 
 in_degrees = dict(G.in_degree())
-pos = nx.spring_layout(G, seed=42)
+pos = _spring_layout(tuple(edges))
 
 overview_colors = ['lightgray'] * len(G.nodes())
 st.pyplot(_draw_sociogram(G, pos, list(categories.keys()), overview_colors, 'Sociogram'))
 
-# ─── Add Sidebar Filters and Cluster Coloring ───────────────────────
+# ─── Sidebar filters ──────────────────────────────────────────────────
 
-# Sidebar settings
 st.sidebar.header("Settings")
 selected_categories = st.sidebar.multiselect(
     "Select nomination types to display",
@@ -277,23 +296,23 @@ cluster_coloring = st.sidebar.checkbox(
     value=False
 )
 
-# ─── Build Filtered Graph ─────────────────────────────────────────────
-# Rebuild the graph using only the selected categories so that node
-# sizes, in-degrees, clustering, and stats all reflect what is shown.
+# ─── Filtered graph ───────────────────────────────────────────────────
+# Rebuilt from only the selected categories so node sizes, in-degrees,
+# clustering, and stats all reflect what is shown.
 
 G_filtered = nx.DiGraph()
-G_filtered.add_nodes_from(G.nodes())  # preserve all nodes (avoid layout jumps)
+G_filtered.add_nodes_from(G.nodes())  # preserve all nodes so layout positions stay stable
 for u, v, cat in edges:
     if cat in selected_categories:
         G_filtered.add_edge(u, v, category=cat)
 
 in_degrees_filtered = dict(G_filtered.in_degree())
 
-# If clustering enabled, compute communities on the filtered graph
 partition = None
 if cluster_coloring:
+    filtered_edges = tuple((u, v, cat) for u, v, cat in edges if cat in selected_categories)
     try:
-        partition = community_louvain.best_partition(G_filtered.to_undirected())
+        partition = _louvain_partition(filtered_edges)
         unique_groups = sorted(set(partition.values()))
         color_map = cm.get_cmap('tab10', len(unique_groups))
         node_colors = [color_map(partition[n]) for n in G_filtered.nodes()]
@@ -308,11 +327,20 @@ if not cluster_coloring:
     norm = Normalize(vmin=0, vmax=max_deg)
     node_colors = [cm.viridis(norm(in_degrees_filtered.get(n, 0))) for n in G_filtered.nodes()]
 
-# ─── Draw filtered graph ─────────────────────────────────────────────
-
 st.pyplot(_draw_sociogram(G_filtered, pos, selected_categories, node_colors, 'Sociogram (Filtered)'))
 
-# ─── Generate PDF Report ─────────────────────────────────────────────
+# ─── Nomination summary ───────────────────────────────────────────────
+# Computed once here; used by both the PDF report and the summary table below.
+
+summary_counts = {
+    student: {"Inclusive": 0, "Helpful": 0, "Collaborator": 0}
+    for student in G_filtered.nodes()
+}
+for _, target, cat in edges:
+    if cat in selected_categories and target in summary_counts:
+        summary_counts[target][cat] += 1
+
+# ─── PDF report ───────────────────────────────────────────────────────
 
 if st.button("📄 Generate PDF Report"):
     audit.pdf_exported(
@@ -349,11 +377,9 @@ if st.button("📄 Generate PDF Report"):
             pdf.ln(10)
             pdf.cell(0, 10, txt="Top 3 Nominated Students in Each Category:", ln=True)
             for cat in categories:
-                nomination_counts = {}
-                for _, target, c in edges:
-                    if c == cat:
-                        nomination_counts[target] = nomination_counts.get(target, 0) + 1
-                top3 = sorted(nomination_counts.items(), key=lambda x: x[1], reverse=True)[:3]
+                # Derive per-category counts from summary_counts (already computed above)
+                cat_counts = {s: c[cat] for s, c in summary_counts.items() if c[cat] > 0}
+                top3 = sorted(cat_counts.items(), key=lambda x: x[1], reverse=True)[:3]
                 pdf.cell(0, 10, txt=f"{cat}:", ln=True)
                 for name, count in top3:
                     _row(f"- {name}: {count} nominations")
@@ -389,13 +415,7 @@ if st.button("📄 Generate PDF Report"):
                 "do not contain unsupported special characters."
             )
 
-# ─── Export Full Summary Table ──────────────────────────────────────────
-
-summary_counts = {student: {"Inclusive": 0, "Helpful": 0, "Collaborator": 0} for student in G_filtered.nodes()}
-
-for _, target, cat in edges:
-    if cat in selected_categories and target in summary_counts:
-        summary_counts[target][cat] += 1
+# ─── Summary table ────────────────────────────────────────────────────
 
 summary_table = pd.DataFrame([
     {
@@ -406,7 +426,6 @@ summary_table = pd.DataFrame([
     for student, counts in summary_counts.items()
 ])
 
-# Sort by Total nominations descending
 summary_table = summary_table.sort_values(by="Total", ascending=False)
 
 st.dataframe(summary_table)

@@ -118,17 +118,13 @@ def sample_data_loaded():
 
 def pdf_exported(student_count: int, categories_shown: list[str]):
     """Log a PDF export. Records aggregate counts and active filters only."""
-    _emit(
-        "PDF_EXPORT",
-        students=student_count,
-        categories="+".join(categories_shown) if categories_shown else "none",
-    )
+    _emit("PDF_EXPORT", students=student_count, categories=_fmt_cats(categories_shown))
 
 
 def csv_exported(student_count: int, categories_shown: list[str]):
     """Log a CSV export. Records aggregate counts and active filters only."""
-    _emit(
-        "CSV_EXPORT",
-        students=student_count,
-        categories="+".join(categories_shown) if categories_shown else "none",
-    )
+    _emit("CSV_EXPORT", students=student_count, categories=_fmt_cats(categories_shown))
+
+
+def _fmt_cats(cats: list[str]) -> str:
+    return "+".join(cats) if cats else "none"
