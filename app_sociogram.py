@@ -38,6 +38,36 @@ st.markdown('''
 
 MAX_UPLOAD_BYTES = 5 * 1024 * 1024  # 5 MB
 
+# ─── Privacy Collection Notice ────────────────────────────────────────
+# Required under the NSW Privacy and Personal Information Protection Act 1998
+# and the NSW DoE Privacy Code of Practice before personal information is
+# collected. Shown once per session; must be explicitly acknowledged.
+
+if not st.session_state.get("privacy_acknowledged"):
+    st.info(
+        "**Privacy Collection Notice**\n\n"
+        "This tool collects student names and peer nomination responses "
+        "submitted via your class survey. This information is collected for "
+        "the purpose of generating a sociogram to help you understand social "
+        "connections within your class.\n\n"
+        "**How your data is handled:**\n"
+        "- Data is processed in your browser session only and is **not stored** "
+        "on any server after your session ends.\n"
+        "- Data is **not shared** with any third party.\n"
+        "- You are responsible for ensuring students have been appropriately "
+        "informed that their responses will be used for this purpose.\n\n"
+        "This tool is operated in accordance with the "
+        "[NSW Privacy and Personal Information Protection Act 1998]"
+        "(https://legislation.nsw.gov.au/view/html/inforce/current/act-1998-133) "
+        "and the NSW Department of Education Privacy Code of Practice.\n\n"
+        "By continuing, you confirm you are authorised to collect and view "
+        "this student information in your professional capacity as a NSW DoE staff member."
+    )
+    if st.button("I understand — continue to the tool"):
+        st.session_state["privacy_acknowledged"] = True
+        st.rerun()
+    st.stop()
+
 uploaded_file = st.file_uploader("Upload your CSV file", type=["csv"])
 
 if st.button("📥 Load Example Data"):
