@@ -1,29 +1,40 @@
 # app_sociogram.py
 
-import streamlit as st
+import io
+from collections import defaultdict
 
+import community as community_louvain
+import matplotlib.pyplot as plt
+import networkx as nx
+import pandas as pd
+import streamlit as st
+from fpdf import FPDF
+from matplotlib import cm
+from matplotlib.colors import Normalize
+from matplotlib.patches import Patch
+
+import auth
+
+# ─── Authentication ────────────────────────────────────────────────
 st.set_page_config(page_title="Sociogram Generator", layout="wide")
+current_user = auth.require_auth()
+
+# ─── Sidebar: user identity & logout ──────────────────────────────
+with st.sidebar:
+    st.markdown("---")
+    st.markdown(f"**Signed in as**")
+    st.markdown(f"{current_user['display_name']}")
+    st.caption(current_user['email'])
+    if st.button("Sign out", use_container_width=True):
+        auth.logout()
+
 st.title("📊 Sociogram Generator")
 
 st.markdown('''
-> **ℹ️ This Sociogram Generator is based on student responses to a survey.**  
-> To access your own copy of the survey for use with your students, click here:  
+> **ℹ️ This Sociogram Generator is based on student responses to a survey.**
+> To access your own copy of the survey for use with your students, click here:
 > [Google Form Template](https://docs.google.com/forms/d/16ARyYjgnF0SN-5VO3ZNriftCPjHhI94ylKUk7t8jiFk/copy)
 ''')
-
-
-
-# ─── Load and Normalize Data ───────────────────────────────────────
-import pandas as pd
-import networkx as nx
-import matplotlib.pyplot as plt
-from matplotlib.patches import Patch
-from matplotlib import cm
-from matplotlib.colors import Normalize
-from fpdf import FPDF
-import community as community_louvain
-import io
-from collections import defaultdict
 
 uploaded_file = st.file_uploader("Upload your CSV file", type=["csv"])
 
