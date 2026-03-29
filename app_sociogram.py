@@ -200,7 +200,14 @@ if uploaded_file is not None:
             "and that the column headers haven't been renamed."
         )
         st.stop()
-    edges = _load_and_build(file_bytes)
+    try:
+        edges = _load_and_build(file_bytes)
+    except Exception as e:
+        st.error(
+            f"An unexpected error occurred while processing the file: {e}\n\n"
+            "Try re-exporting the CSV from Google Sheets and uploading again."
+        )
+        st.stop()
 elif st.session_state.get("sample_data") is not None:
     # Convert sample dict to CSV bytes so it goes through the same cached pipeline
     sample_bytes = pd.DataFrame(st.session_state["sample_data"]).to_csv(index=False).encode()
@@ -214,6 +221,15 @@ else:
 G = nx.DiGraph()
 for u, v, cat in edges:
     G.add_edge(u, v, category=cat)
+
+if G.number_of_edges() == 0:
+    st.warning(
+        "No nominations were found in the uploaded data. "
+        "This usually means the nomination columns are empty, or their headers "
+        "don't contain the words 'Inclusive', 'Helpful', or 'Collaborator'. "
+        "Please check your CSV and try again."
+    )
+    st.stop()
 
 # ─── Graph drawing helper ─────────────────────────────────────────────
 
@@ -315,7 +331,7 @@ if cluster_coloring:
         partition = _louvain_partition(filtered_edges)
         unique_groups = sorted(set(partition.values()))
         color_map = cm.get_cmap('tab10', len(unique_groups))
-        node_colors = [color_map(partition[n]) for n in G_filtered.nodes()]
+        node_colors = [color_map(partition.get(n, 0)) for n in G_filtered.nodes()]
     except Exception as e:
         st.warning(
             f"Cluster detection could not be completed ({e}). "
@@ -323,9 +339,13 @@ if cluster_coloring:
         )
         cluster_coloring = False
 if not cluster_coloring:
-    max_deg = max(in_degrees_filtered.values()) if in_degrees_filtered else 1
+    max_deg = max(max(in_degrees_filtered.values()) if in_degrees_filtered else 0, 1)
     norm = Normalize(vmin=0, vmax=max_deg)
     node_colors = [cm.viridis(norm(in_degrees_filtered.get(n, 0))) for n in G_filtered.nodes()]
+
+if not selected_categories:
+    st.info("Select at least one nomination type in the sidebar to display the filtered sociogram.")
+    st.stop()
 
 st.pyplot(_draw_sociogram(G_filtered, pos, selected_categories, node_colors, 'Sociogram (Filtered)'))
 
