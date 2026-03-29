@@ -36,6 +36,8 @@ st.markdown('''
 > [Google Form Template](https://docs.google.com/forms/d/16ARyYjgnF0SN-5VO3ZNriftCPjHhI94ylKUk7t8jiFk/copy)
 ''')
 
+MAX_UPLOAD_BYTES = 5 * 1024 * 1024  # 5 MB
+
 uploaded_file = st.file_uploader("Upload your CSV file", type=["csv"])
 
 if st.button("📥 Load Example Data"):
@@ -56,15 +58,74 @@ if st.button("📥 Load Example Data"):
 
 
 # ─── Read CSV and Normalize ───────────────────────────────────────────
+
+def _validate_csv(dataframe: pd.DataFrame) -> list[str]:
+    """
+    Returns a list of human-readable error strings.
+    Empty list means the dataframe is valid.
+    """
+    errors = []
+    if dataframe.empty:
+        errors.append("The uploaded file contains no rows.")
+        return errors
+    if len(dataframe.columns) < 2:
+        errors.append(
+            "Expected at least 2 columns (Timestamp, Your name) but found "
+            f"{len(dataframe.columns)}."
+        )
+        return errors
+
+    # Check the name column is present and non-empty
+    name_column = dataframe.columns[1]
+    if dataframe[name_column].dropna().eq("").all():
+        errors.append(f'Column "{name_column}" (student names) appears to be empty.')
+
+    # Check at least one nomination column exists
+    nomination_cols = [
+        c for c in dataframe.columns
+        if any(cat in c for cat in ["Inclusive", "Helpful", "Collaborator"])
+    ]
+    if not nomination_cols:
+        errors.append(
+            "No nomination columns found. Expected columns containing "
+            '"Inclusive", "Helpful", or "Collaborator" (e.g. "Inclusive - Choice 1").'
+        )
+
+    return errors
+
+
 if uploaded_file is not None:
-    df = pd.read_csv(uploaded_file)
+    if uploaded_file.size > MAX_UPLOAD_BYTES:
+        st.error(
+            f"File is too large ({uploaded_file.size / 1024 / 1024:.1f} MB). "
+            f"Maximum allowed size is {MAX_UPLOAD_BYTES // 1024 // 1024} MB."
+        )
+        st.stop()
+    try:
+        df = pd.read_csv(uploaded_file)
+    except Exception as e:
+        st.error(f"Could not read the CSV file: {e}")
+        st.stop()
+    validation_errors = _validate_csv(df)
+    if validation_errors:
+        st.error("**The uploaded file has the following issues:**")
+        for err in validation_errors:
+            st.markdown(f"- {err}")
+        st.markdown(
+            "Please check that you exported from the correct Google Form response sheet "
+            "and that the column headers haven't been renamed."
+        )
+        st.stop()
 elif st.session_state.get("sample_data") is not None:
     df = pd.DataFrame(st.session_state["sample_data"])
 else:
     st.info("Please upload a CSV exported from your Google Sheet.")
     st.stop()
 
-name_col = df.columns[1]  # column B: "Your name"
+# Identify name column by header name, falling back to position
+_name_col_candidates = [c for c in df.columns if "name" in c.lower()]
+name_col = _name_col_candidates[0] if _name_col_candidates else df.columns[1]
+
 df[name_col] = df[name_col].astype(str).str.strip().str.title()
 for col in df.columns:
     if any(cat in col for cat in ["Inclusive", "Helpful", "Collaborator"]):
