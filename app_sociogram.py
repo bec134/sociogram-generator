@@ -195,52 +195,72 @@ G = nx.DiGraph()
 for u, v, cat in edges:
     G.add_edge(u, v, category=cat)
 
-# ─── Compute Layout and Plot Graph ──────────────────────────────────
+# ─── Shared graph drawing helper ─────────────────────────────────────
 
-# Compute node in-degrees for sizing
-in_degrees = dict(G.in_degree())
+# Edge curvature offsets keep the three category arrows visually separated.
+rads = {"Inclusive": -0.7, "Helpful": 0.0, "Collaborator": 0.7}
 scale = 100
-node_sizes = [(in_degrees.get(n, 0) + 1) ** 2 * scale for n in G.nodes()]
 
-# Compute layout
+
+def _draw_sociogram(
+    graph: nx.DiGraph,
+    layout: dict,
+    cats_to_draw: list,
+    node_colors,
+    title: str,
+) -> plt.Figure:
+    """
+    Render a sociogram and return the matplotlib Figure.
+
+    Args:
+        graph:        The directed graph to draw.
+        layout:       Pre-computed node position dict (from nx.*_layout).
+        cats_to_draw: Which nomination categories to include as edges.
+        node_colors:  Per-node colour list (popularity gradient or cluster).
+        title:        Figure title string.
+    """
+    in_deg = dict(graph.in_degree())
+    sizes = [(in_deg.get(n, 0) + 1) ** 2 * scale for n in graph.nodes()]
+
+    fig, ax = plt.subplots(figsize=(12, 10))
+    nx.draw_networkx_nodes(
+        graph, layout,
+        node_size=sizes,
+        node_color=node_colors,
+        edgecolors='black',
+        linewidths=1,
+        ax=ax,
+    )
+    for cat in cats_to_draw:
+        color = categories[cat]
+        edgelist = [(u, v) for u, v, d in graph.edges(data=True) if d.get("category") == cat]
+        nx.draw_networkx_edges(
+            graph, layout,
+            edgelist=edgelist,
+            edge_color=color,
+            arrowstyle='-|>',
+            arrowsize=20,
+            width=2,
+            connectionstyle=f'arc3,rad={rads[cat]}',
+            ax=ax,
+        )
+    nx.draw_networkx_labels(graph, layout, font_size=10, ax=ax)
+    legend_handles = [
+        Patch(facecolor=categories[cat], label=cat) for cat in cats_to_draw
+    ]
+    ax.legend(handles=legend_handles, title='Nomination Type', loc='lower left')
+    ax.set_title(title, fontsize=16)
+    ax.axis('off')
+    return fig
+
+
+# ─── Compute Layout and draw overview graph ──────────────────────────
+
+in_degrees = dict(G.in_degree())
 pos = nx.spring_layout(G, seed=42)
 
-# Plot the graph
-fig, ax = plt.subplots(figsize=(12, 10))
-nx.draw_networkx_nodes(
-    G, pos,
-    node_size=node_sizes,
-    node_color='lightgray',
-    edgecolors='black',
-    linewidths=1
-)
-
-# Draw edges colored by category
-rads = {"Inclusive": -0.7, "Helpful": 0.0, "Collaborator": 0.7}
-for cat in categories:
-    color = categories[cat]
-    edgelist = [(u, v) for u, v, d in G.edges(data=True) if d.get("category") == cat]
-    nx.draw_networkx_edges(
-        G, pos,
-        edgelist=edgelist,
-        edge_color=color,
-        arrowstyle='-|>',
-        arrowsize=20,
-        width=2,
-        connectionstyle=f'arc3,rad={rads[cat]}'
-    )
-
-# Draw labels
-nx.draw_networkx_labels(G, pos, font_size=10)
-
-# Legend
-legend_handles = [Patch(facecolor=clr, label=cat) for cat, clr in categories.items()]
-plt.legend(handles=legend_handles, title='Nomination Type', loc='lower left')
-
-plt.title('Sociogram', fontsize=16)
-plt.axis('off')
-
-st.pyplot(fig)
+overview_colors = ['lightgray'] * len(G.nodes())
+st.pyplot(_draw_sociogram(G, pos, list(categories.keys()), overview_colors, 'Sociogram'))
 
 # ─── Add Sidebar Filters and Cluster Coloring ───────────────────────
 
@@ -268,9 +288,6 @@ for u, v, cat in edges:
         G_filtered.add_edge(u, v, category=cat)
 
 in_degrees_filtered = dict(G_filtered.in_degree())
-node_sizes_filtered = [
-    (in_degrees_filtered.get(n, 0) + 1) ** 2 * scale for n in G_filtered.nodes()
-]
 
 # If clustering enabled, compute communities on the filtered graph
 partition = None
@@ -291,40 +308,9 @@ if not cluster_coloring:
     norm = Normalize(vmin=0, vmax=max_deg)
     node_colors = [cm.viridis(norm(in_degrees_filtered.get(n, 0))) for n in G_filtered.nodes()]
 
-# ─── Redraw Graph Based on Sidebar Settings ─────────────────────────
+# ─── Draw filtered graph ─────────────────────────────────────────────
 
-# Replot graph with updated filters and node colors
-fig, ax = plt.subplots(figsize=(12, 10))
-nx.draw_networkx_nodes(
-    G_filtered, pos,
-    node_size=node_sizes_filtered,
-    node_color=node_colors,
-    edgecolors='black',
-    linewidths=1
-)
-
-for cat in selected_categories:
-    color = categories[cat]
-    edgelist = [(u, v) for u, v, d in G_filtered.edges(data=True) if d.get("category") == cat]
-    nx.draw_networkx_edges(
-        G_filtered, pos,
-        edgelist=edgelist,
-        edge_color=color,
-        arrowstyle='-|>',
-        arrowsize=20,
-        width=2,
-        connectionstyle=f'arc3,rad={rads[cat]}'
-    )
-
-nx.draw_networkx_labels(G_filtered, pos, font_size=10)
-
-legend_handles = [Patch(facecolor=clr, label=cat) for cat, clr in categories.items() if cat in selected_categories]
-plt.legend(handles=legend_handles, title='Nomination Type', loc='lower left')
-
-plt.title('Sociogram (Filtered)', fontsize=16)
-plt.axis('off')
-
-st.pyplot(fig)
+st.pyplot(_draw_sociogram(G_filtered, pos, selected_categories, node_colors, 'Sociogram (Filtered)'))
 
 # ─── Generate PDF Report ─────────────────────────────────────────────
 
