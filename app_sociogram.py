@@ -172,7 +172,7 @@ if not st.session_state.get("privacy_acknowledged"):
 
 # ─── Upload section ────────────────────────────────────────────────────────────
 st.subheader("Load data")
-col_upload, col_mid, col_sample = st.columns([5, 1, 3])
+col_upload, col_mid, col_sheets = st.columns([4, 1, 4])
 
 with col_upload:
     uploaded_file = st.file_uploader("Upload your CSV file", type=["csv"], label_visibility="collapsed")
@@ -183,22 +183,33 @@ with col_mid:
         unsafe_allow_html=True,
     )
 
-with col_sample:
-    st.markdown("<div style='padding-top:1.1rem;'>", unsafe_allow_html=True)
-    if st.button("Load example data", use_container_width=True):
-        audit.sample_data_loaded()
-        st.session_state["sample_data"] = {
-            "Timestamp": ["2025-04-01"] * 5,
-            "Your name": ["Alice", "Bob", "Charlie", "David", "Eva"],
-            "Inclusive - Choice 1": ["Bob", "Charlie", "David", "Eva", "Alice"],
-            "Inclusive - Choice 2": ["Charlie", "", "", "", "Bob"],
-            "Helpful - Choice 1": ["Eva", "David", "", "Charlie", ""],
-            "Helpful - Choice 2": ["", "Alice", "Bob", "", "David"],
-            "Collaborator - Choice 1": ["David", "", "Eva", "Bob", "Charlie"],
-            "Collaborator - Choice 2": ["", "", "", "Alice", ""],
-        }
-        st.rerun()
-    st.markdown("</div>", unsafe_allow_html=True)
+with col_sheets:
+    sheets_url = st.text_input(
+        "Paste Google Sheets URL",
+        placeholder="https://docs.google.com/spreadsheets/d/...",
+        help="The sheet must be shared as 'Anyone with the link can view'.",
+        label_visibility="collapsed",
+    )
+    if sheets_url:
+        if st.button("Load from Google Sheets", use_container_width=True, type="primary"):
+            st.session_state["sheets_url"] = sheets_url
+            st.session_state.pop("sample_data", None)
+            st.rerun()
+
+if st.button("Load example data", key="load_example"):
+    audit.sample_data_loaded()
+    st.session_state["sample_data"] = {
+        "Timestamp": ["2025-04-01"] * 5,
+        "Your name": ["Alice", "Bob", "Charlie", "David", "Eva"],
+        "Inclusive - Choice 1": ["Bob", "Charlie", "David", "Eva", "Alice"],
+        "Inclusive - Choice 2": ["Charlie", "", "", "", "Bob"],
+        "Helpful - Choice 1": ["Eva", "David", "", "Charlie", ""],
+        "Helpful - Choice 2": ["", "Alice", "Bob", "", "David"],
+        "Collaborator - Choice 1": ["David", "", "Eva", "Bob", "Charlie"],
+        "Collaborator - Choice 2": ["", "", "", "Alice", ""],
+    }
+    st.session_state.pop("sheets_url", None)
+    st.rerun()
 
 # ─── Nomination categories ─────────────────────────────────────────────────────
 categories = {
@@ -231,6 +242,45 @@ def _validate_csv(dataframe: pd.DataFrame) -> list[str]:
             '"Inclusive", "Helpful", or "Collaborator" (e.g. "Inclusive - Choice 1").'
         )
     return errors
+
+
+# ─── Google Sheets URL helper ─────────────────────────────────────────────────
+
+def _sheets_url_to_csv_bytes(url: str) -> bytes:
+    """
+    Convert a Google Sheets share URL to CSV bytes by using the /export endpoint.
+
+    Accepts URLs in the forms:
+      https://docs.google.com/spreadsheets/d/SHEET_ID/edit#gid=GID
+      https://docs.google.com/spreadsheets/d/SHEET_ID/edit?usp=sharing
+      https://docs.google.com/spreadsheets/d/SHEET_ID/
+    """
+    import re
+    import urllib.request
+
+    match = re.search(r"/spreadsheets/d/([a-zA-Z0-9_-]+)", url)
+    if not match:
+        raise ValueError("Could not find a spreadsheet ID in the URL. Please check the link.")
+
+    sheet_id = match.group(1)
+
+    # Preserve gid (sheet tab) if present
+    gid_match = re.search(r"[#&?]gid=(\d+)", url)
+    gid = gid_match.group(1) if gid_match else "0"
+
+    export_url = (
+        f"https://docs.google.com/spreadsheets/d/{sheet_id}"
+        f"/export?format=csv&gid={gid}"
+    )
+
+    try:
+        with urllib.request.urlopen(export_url, timeout=15) as resp:  # noqa: S310
+            return resp.read()
+    except Exception as exc:
+        raise ValueError(
+            f"Could not fetch the sheet ({exc}). "
+            "Make sure the sheet is shared as 'Anyone with the link can view'."
+        ) from exc
 
 
 # ─── Cached data pipeline ──────────────────────────────────────────────────────
@@ -308,11 +358,43 @@ if uploaded_file is not None:
             "Try re-exporting the CSV from Google Sheets and uploading again."
         )
         st.stop()
+elif st.session_state.get("sheets_url"):
+    with st.spinner("Fetching data from Google Sheets..."):
+        try:
+            file_bytes = _sheets_url_to_csv_bytes(st.session_state["sheets_url"])
+        except ValueError as e:
+            st.error(str(e))
+            st.session_state.pop("sheets_url", None)
+            st.stop()
+    if len(file_bytes) > MAX_UPLOAD_BYTES:
+        st.error(
+            f"Sheet is too large ({len(file_bytes) / 1024 / 1024:.1f} MB). "
+            f"Maximum allowed size is {MAX_UPLOAD_BYTES // 1024 // 1024} MB."
+        )
+        st.stop()
+    audit.file_uploaded(len(file_bytes))
+    try:
+        raw_df = pd.read_csv(io.BytesIO(file_bytes))
+    except Exception as e:
+        st.error(f"Could not parse the sheet as CSV: {e}")
+        st.stop()
+    validation_errors = _validate_csv(raw_df)
+    if validation_errors:
+        st.error("**The sheet has the following issues:**")
+        for err in validation_errors:
+            st.markdown(f"- {err}")
+        st.stop()
+    try:
+        edges = _load_and_build(file_bytes)
+    except Exception as e:
+        st.error(f"An unexpected error occurred while processing the sheet: {e}")
+        st.stop()
+    st.success("Loaded from Google Sheets.")
 elif st.session_state.get("sample_data") is not None:
     sample_bytes = pd.DataFrame(st.session_state["sample_data"]).to_csv(index=False).encode()
     edges = _load_and_build(sample_bytes)
 else:
-    st.caption("Upload a CSV exported from your Google Form responses, or load the example data to explore.")
+    st.caption("Upload a CSV, paste a Google Sheets URL, or load the example data to explore.")
     st.stop()
 
 # ─── Build full graph ──────────────────────────────────────────────────────────
@@ -372,6 +454,51 @@ if not selected_categories:
     st.info("Select at least one nomination type in the sidebar to display the sociogram.")
     st.stop()
 
+# ─── Class insights ───────────────────────────────────────────────────────────
+
+with st.expander("Class insights", expanded=True):
+    ins1, ins2, ins3 = st.columns(3)
+
+    # Most nominated (by in-degree on filtered graph)
+    sorted_by_degree = sorted(in_degrees_filtered.items(), key=lambda x: x[1], reverse=True)
+    top_nominated = [(n, d) for n, d in sorted_by_degree if d > 0][:3]
+
+    with ins1:
+        st.markdown("**Most nominated**")
+        if top_nominated:
+            for name, deg in top_nominated:
+                st.markdown(f"- **{name}** — {deg} nomination{'s' if deg != 1 else ''}")
+        else:
+            st.caption("No nominations in selected categories.")
+
+    # Social bridges (betweenness centrality on undirected filtered graph)
+    with ins2:
+        st.markdown("**Social bridges**")
+        st.caption("Students who connect different groups.")
+        if G_filtered.number_of_edges() > 0:
+            betweenness = nx.betweenness_centrality(G_filtered.to_undirected())
+            top_bridges = sorted(betweenness.items(), key=lambda x: x[1], reverse=True)
+            top_bridges = [(n, s) for n, s in top_bridges if s > 0][:3]
+            if top_bridges:
+                for name, score in top_bridges:
+                    st.markdown(f"- **{name}** — score {score:.2f}")
+            else:
+                st.caption("No bridges detected.")
+        else:
+            st.caption("No edges in selected categories.")
+
+    # Isolated students (no nominations given or received)
+    with ins3:
+        st.markdown("**Isolated students**")
+        st.caption("Not nominated by anyone in selected categories.")
+        isolated = [n for n in G_filtered.nodes() if in_degrees_filtered.get(n, 0) == 0]
+        if isolated:
+            for name in sorted(isolated):
+                st.markdown(f"- {name}")
+        else:
+            st.success("No isolated students.")
+
+
 # ─── Graph drawing helper ──────────────────────────────────────────────────────
 
 rads = {"Inclusive": -0.7, "Helpful": 0.0, "Collaborator": 0.7}
@@ -429,6 +556,88 @@ with tab_overview:
 
 with tab_filtered:
     st.pyplot(_draw_sociogram(G_filtered, pos, selected_categories, node_colors, "Filtered by selected types"))
+
+# ─── Student detail panel ─────────────────────────────────────────────────────
+
+st.markdown("---")
+st.subheader("Student detail")
+
+all_students = sorted(G_filtered.nodes())
+selected_student = st.selectbox(
+    "Select a student to see their nomination profile",
+    options=["— select a student —"] + all_students,
+    label_visibility="collapsed",
+)
+
+if selected_student != "— select a student —":
+    # Incoming: who nominated this student
+    received = {}
+    for src, tgt, cat in edges:
+        if tgt == selected_student and cat in selected_categories:
+            received.setdefault(cat, []).append(src)
+
+    # Outgoing: who this student nominated
+    gave = {}
+    for src, tgt, cat in edges:
+        if src == selected_student and cat in selected_categories:
+            gave.setdefault(cat, []).append(tgt)
+
+    # Betweenness score
+    if G_filtered.number_of_edges() > 0:
+        betweenness = nx.betweenness_centrality(G_filtered.to_undirected())
+        b_score = betweenness.get(selected_student, 0.0)
+    else:
+        b_score = 0.0
+
+    total_received = sum(len(v) for v in received.values())
+
+    st.markdown(f"""
+    <div style="
+        background:#fff;border:1px solid #D7DCE0;border-radius:8px;
+        padding:1.25rem 1.5rem;margin-bottom:1rem;
+    ">
+        <div style="font-size:1.2rem;font-weight:700;color:#002664;margin-bottom:0.25rem;">
+            {selected_student}
+        </div>
+        <div style="color:#555;font-size:0.85rem;">
+            {total_received} nomination{'s' if total_received != 1 else ''} received
+            &nbsp;·&nbsp;
+            Bridge score: {b_score:.2f}
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
+
+    col_recv, col_gave = st.columns(2)
+
+    with col_recv:
+        st.markdown("**Nominated by**")
+        if received:
+            for cat in selected_categories:
+                nominators = received.get(cat, [])
+                if nominators:
+                    color = categories[cat]
+                    st.markdown(
+                        f"<span style='color:{color};font-weight:600;'>{cat}</span>: "
+                        + ", ".join(nominators),
+                        unsafe_allow_html=True,
+                    )
+        else:
+            st.caption("Not nominated by anyone in the selected categories.")
+
+    with col_gave:
+        st.markdown("**Nominated**")
+        if gave:
+            for cat in selected_categories:
+                nominees = gave.get(cat, [])
+                if nominees:
+                    color = categories[cat]
+                    st.markdown(
+                        f"<span style='color:{color};font-weight:600;'>{cat}</span>: "
+                        + ", ".join(nominees),
+                        unsafe_allow_html=True,
+                    )
+        else:
+            st.caption("Did not nominate anyone in the selected categories.")
 
 # ─── Nomination summary ────────────────────────────────────────────────────────
 
