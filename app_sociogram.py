@@ -199,14 +199,49 @@ with col_sheets:
 if st.button("Load example data", key="load_example"):
     audit.sample_data_loaded()
     st.session_state["sample_data"] = {
-        "Timestamp": ["2025-04-01"] * 5,
-        "Your name": ["Alice", "Bob", "Charlie", "David", "Eva"],
-        "Inclusive - Choice 1": ["Bob", "Charlie", "David", "Eva", "Alice"],
-        "Inclusive - Choice 2": ["Charlie", "", "", "", "Bob"],
-        "Helpful - Choice 1": ["Eva", "David", "", "Charlie", ""],
-        "Helpful - Choice 2": ["", "Alice", "Bob", "", "David"],
-        "Collaborator - Choice 1": ["David", "", "Eva", "Bob", "Charlie"],
-        "Collaborator - Choice 2": ["", "", "", "Alice", ""],
+        "Timestamp": ["2025-04-01"] * 30,
+        "Your name": [
+            "Alice", "Ben", "Charlotte", "Daniel", "Emma", "Finn", "Grace", "Harry",
+            "Isla", "Jack", "Kayla", "Liam", "Mia", "Noah", "Olivia", "Patrick",
+            "Quinn", "Ryan", "Sophie", "Thomas", "Uma", "Victor", "Willow", "Connor",
+            "Yasmin", "Zoe", "Aiden", "Bella", "Xavier", "Daisy",
+        ],
+        "Inclusive - Choice 1": [
+            "Emma", "Emma", "Emma", "Grace", "Alice", "Charlotte", "Emma", "Emma",
+            "Liam", "Liam", "Liam", "Isla", "Liam", "Olivia", "Liam", "Liam",
+            "Sophie", "Sophie", "Quinn", "Sophie", "Sophie", "Sophie", "Sophie", "Sophie",
+            "Emma", "Alice", "Liam", "Emma", "Sophie", "Aiden",
+        ],
+        "Inclusive - Choice 2": [
+            "Ben", "Yasmin", "Daniel", "Emma", "Bella", "Emma", "Harry", "Finn",
+            "Yasmin", "Kayla", "Jack", "Mia", "Noah", "Liam", "Jack", "Mia",
+            "Ryan", "Thomas", "Uma", "Ryan", "Willow", "Connor", "Victor", "Uma",
+            "Liam", "Sophie", "Sophie", "Sophie", "Liam", "",
+        ],
+        "Helpful - Choice 1": [
+            "Emma", "Alice", "Emma", "Ben", "Finn", "Emma", "Charlotte", "Grace",
+            "Liam", "Olivia", "Liam", "Jack", "Kayla", "Liam", "Noah", "Kayla",
+            "Sophie", "Uma", "Ryan", "Uma", "Thomas", "Sophie", "Sophie", "Ryan",
+            "Alice", "Bella", "Noah", "Alice", "Quinn", "Sophie",
+        ],
+        "Helpful - Choice 2": [
+            "Yasmin", "Charlotte", "Harry", "Alice", "Grace", "Harry", "Emma", "Ben",
+            "Aiden", "Liam", "Mia", "Olivia", "Jack", "Kayla", "Patrick", "Noah",
+            "Connor", "Sophie", "Thomas", "Quinn", "Connor", "Uma", "Aiden", "Victor",
+            "Yasmin", "Grace", "Aiden", "Finn", "Thomas", "",
+        ],
+        "Collaborator - Choice 1": [
+            "Emma", "Emma", "Ben", "Charlotte", "Daniel", "Ben", "Harry", "Grace",
+            "Liam", "Liam", "Olivia", "Kayla", "Patrick", "Mia", "Liam", "Jack",
+            "Sophie", "Quinn", "Thomas", "Sophie", "Victor", "Uma", "Connor", "Sophie",
+            "Ben", "Emma", "Patrick", "Zoe", "Victor", "Liam",
+        ],
+        "Collaborator - Choice 2": [
+            "Zoe", "Harry", "Alice", "Emma", "Bella", "Alice", "Ben", "Emma",
+            "Patrick", "Isla", "Jack", "Noah", "Liam", "Jack", "Mia", "Aiden",
+            "Willow", "Victor", "Uma", "Willow", "Sophie", "Connor", "Ryan", "Willow",
+            "Isla", "Charlotte", "Mia", "Alice", "Sophie", "",
+        ],
     }
     st.session_state.pop("sheets_url", None)
     st.rerun()
