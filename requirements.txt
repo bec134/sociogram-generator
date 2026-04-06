@@ -4,3 +4,5 @@ networkx
 matplotlib
 fpdf
 python-louvain
+google-auth
+google-auth-oauthlib
