@@ -272,8 +272,17 @@ def _validate_csv(dataframe: pd.DataFrame) -> list[str]:
         return errors
 
     name_column = dataframe.columns[1]
-    if dataframe[name_column].dropna().eq("").all():
+    names = dataframe[name_column].dropna()
+    if names.eq("").all():
         errors.append(f'Column "{name_column}" (student names) appears to be empty.')
+
+    duplicates = names[names.duplicated()].unique().tolist()
+    if duplicates:
+        dup_list = ", ".join(duplicates)
+        errors.append(
+            f"Duplicate student names found: {dup_list}. "
+            "If a student submitted the form twice, remove the extra row before uploading."
+        )
 
     nomination_cols = [c for c in dataframe.columns if any(cat in c for cat in categories)]
     if not nomination_cols:
@@ -344,7 +353,9 @@ def _load_and_build(file_bytes: bytes) -> list[tuple]:
                 if col_name in df.columns:
                     target = row[col_name]
                     if pd.notna(target) and str(target).strip():
-                        edges.append((source, str(target).strip(), cat))
+                        target_clean = str(target).strip()
+                        if target_clean != source:  # drop exact self-nominations
+                            edges.append((source, target_clean, cat))
     return edges
 
 
@@ -436,6 +447,91 @@ elif st.session_state.get("sample_data") is not None:
 else:
     st.caption("Upload a CSV, paste a Google Sheets URL, or load the example data to explore.")
     st.stop()
+
+# ─── Name review ──────────────────────────────────────────────────────────────
+# Find nomination targets that don't exactly match any known student name.
+# Each (nominator, unmatched_target) pair gets its own review row so that
+# ambiguous names like "Luke" can resolve differently depending on who wrote it.
+
+import difflib as _difflib
+
+known_names = sorted(set(src for src, _, _ in edges))
+
+# Pairs that need review: (nominator, raw_target) where raw_target ∉ known_names
+unmatched_pairs = [
+    (src, tgt, cat)
+    for src, tgt, cat in edges
+    if tgt not in known_names
+]
+
+if unmatched_pairs:
+    # Session key tied to the known roster so it resets when a new file is loaded
+    _roster_key = "name_review_" + str(hash(tuple(known_names)))
+
+    if st.session_state.get("name_review_confirmed_key") != _roster_key:
+        # Review not yet confirmed for this dataset — show the UI
+
+        st.markdown("---")
+        st.warning(
+            "**Name review needed** — some nominations don't exactly match a student name. "
+            "Adjust each mapping below, then click **Confirm**."
+        )
+
+        pending = {}
+        seen = {}  # (nominator, raw_target) → widget key
+
+        for src, tgt, cat in unmatched_pairs:
+            pair_key = (src, tgt)
+            if pair_key in seen:
+                continue  # same nominator+target can appear across categories — only show once
+            seen[pair_key] = True
+
+            suggestions = _difflib.get_close_matches(tgt, known_names, n=5, cutoff=0.4)
+            # Put suggestions first, then remaining names alphabetically
+            options = (
+                ["— skip this nomination —"]
+                + suggestions
+                + [n for n in known_names if n not in suggestions]
+            )
+            # Pre-select best suggestion; if best match is the nominator themselves, flag it
+            default_idx = 1 if suggestions else 0
+            best = suggestions[0] if suggestions else None
+            is_self = best == src
+
+            label = f"**{src}** nominated \"{tgt}\""
+            if is_self:
+                label += f" — ⚠️ best match is {src} (themselves)"
+
+            prior = st.session_state.get(f"nr_{src}_{tgt}", options[default_idx])
+            prior_idx = options.index(prior) if prior in options else default_idx
+
+            choice = st.selectbox(
+                label,
+                options=options,
+                index=prior_idx,
+                key=f"nr_{src}_{tgt}",
+            )
+            pending[(src, tgt)] = choice
+
+        if st.button("Confirm name mappings", type="primary"):
+            st.session_state["name_review_pending"] = pending
+            st.session_state["name_review_confirmed_key"] = _roster_key
+            st.rerun()
+
+        st.stop()
+
+    # Review confirmed — apply the stored mapping
+    confirmed = st.session_state.get("name_review_pending", {})
+    remapped = []
+    for src, tgt, cat in edges:
+        if tgt not in known_names:
+            mapped = confirmed.get((src, tgt), "— skip this nomination —")
+            if mapped == "— skip this nomination —":
+                continue
+            remapped.append((src, mapped, cat))
+        else:
+            remapped.append((src, tgt, cat))
+    edges = remapped
 
 # ─── Build full graph ──────────────────────────────────────────────────────────
 
