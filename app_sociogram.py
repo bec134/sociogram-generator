@@ -372,6 +372,51 @@ if not selected_categories:
     st.info("Select at least one nomination type in the sidebar to display the sociogram.")
     st.stop()
 
+# ─── Class insights ───────────────────────────────────────────────────────────
+
+with st.expander("Class insights", expanded=True):
+    ins1, ins2, ins3 = st.columns(3)
+
+    # Most nominated (by in-degree on filtered graph)
+    sorted_by_degree = sorted(in_degrees_filtered.items(), key=lambda x: x[1], reverse=True)
+    top_nominated = [(n, d) for n, d in sorted_by_degree if d > 0][:3]
+
+    with ins1:
+        st.markdown("**Most nominated**")
+        if top_nominated:
+            for name, deg in top_nominated:
+                st.markdown(f"- **{name}** — {deg} nomination{'s' if deg != 1 else ''}")
+        else:
+            st.caption("No nominations in selected categories.")
+
+    # Social bridges (betweenness centrality on undirected filtered graph)
+    with ins2:
+        st.markdown("**Social bridges**")
+        st.caption("Students who connect different groups.")
+        if G_filtered.number_of_edges() > 0:
+            betweenness = nx.betweenness_centrality(G_filtered.to_undirected())
+            top_bridges = sorted(betweenness.items(), key=lambda x: x[1], reverse=True)
+            top_bridges = [(n, s) for n, s in top_bridges if s > 0][:3]
+            if top_bridges:
+                for name, score in top_bridges:
+                    st.markdown(f"- **{name}** — score {score:.2f}")
+            else:
+                st.caption("No bridges detected.")
+        else:
+            st.caption("No edges in selected categories.")
+
+    # Isolated students (no nominations given or received)
+    with ins3:
+        st.markdown("**Isolated students**")
+        st.caption("Not nominated by anyone in selected categories.")
+        isolated = [n for n in G_filtered.nodes() if in_degrees_filtered.get(n, 0) == 0]
+        if isolated:
+            for name in sorted(isolated):
+                st.markdown(f"- {name}")
+        else:
+            st.success("No isolated students.")
+
+
 # ─── Graph drawing helper ──────────────────────────────────────────────────────
 
 rads = {"Inclusive": -0.7, "Helpful": 0.0, "Collaborator": 0.7}
