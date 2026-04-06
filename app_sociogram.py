@@ -121,6 +121,11 @@ with st.sidebar:
         value=False,
         help="Uses Louvain community detection to colour clusters instead of popularity gradient.",
     )
+    show_mutual = st.checkbox(
+        "Highlight mutual nominations",
+        value=False,
+        help="Draws a thick purple edge between any two students who nominated each other.",
+    )
 
 # ─── Page header ───────────────────────────────────────────────────────────────
 st.title("Sociogram Generator")
@@ -522,16 +527,16 @@ with st.expander("Class insights", expanded=True):
         else:
             st.caption("No edges in selected categories.")
 
-    # Isolated students (no nominations given or received)
+    # Receiving no nominations (in-degree = 0)
     with ins3:
-        st.markdown("**Isolated students**")
+        st.markdown("**Receiving no nominations**")
         st.caption("Not nominated by anyone in selected categories.")
-        isolated = [n for n in G_filtered.nodes() if in_degrees_filtered.get(n, 0) == 0]
-        if isolated:
-            for name in sorted(isolated):
+        no_nominations = [n for n in G_filtered.nodes() if in_degrees_filtered.get(n, 0) == 0]
+        if no_nominations:
+            for name in sorted(no_nominations):
                 st.markdown(f"- {name}")
         else:
-            st.success("No isolated students.")
+            st.success("Every student received at least one nomination.")
 
 
 # ─── Graph drawing helper ──────────────────────────────────────────────────────
@@ -540,16 +545,68 @@ rads = {"Inclusive": -0.7, "Helpful": 0.0, "Collaborator": 0.7}
 scale = 100
 
 
-def _draw_sociogram(graph, layout, cats_to_draw, node_colors, title):
+def _draw_sociogram(
+    graph, layout, cats_to_draw, node_colors, title,
+    highlight_student=None, mutual_pairs=None,
+):
     in_deg = dict(graph.in_degree())
-    sizes = [(in_deg.get(n, 0) + 1) ** 2 * scale for n in graph.nodes()]
+    nodes = list(graph.nodes())
+
+    # ── Node sizes ────────────────────────────────────────────────────────────
+    if highlight_student and highlight_student in graph:
+        neighbours = (
+            set(graph.successors(highlight_student))
+            | set(graph.predecessors(highlight_student))
+        )
+        sizes = [
+            (in_deg.get(n, 0) + 1) ** 2 * scale * (3 if n == highlight_student else 1.4 if n in neighbours else 0.8)
+            for n in nodes
+        ]
+    else:
+        sizes = [(in_deg.get(n, 0) + 1) ** 2 * scale for n in nodes]
+
+    # ── Node colours ──────────────────────────────────────────────────────────
+    if highlight_student and highlight_student in graph:
+        neighbours = (
+            set(graph.successors(highlight_student))
+            | set(graph.predecessors(highlight_student))
+        )
+        draw_colors = [
+            "#FF6B35" if n == highlight_student
+            else "#93C5FD" if n in neighbours
+            else "#E5E7EB"
+            for n in nodes
+        ]
+    else:
+        draw_colors = node_colors
+
     fig, ax = plt.subplots(figsize=(12, 10))
     fig.patch.set_facecolor("#F5F7FA")
     ax.set_facecolor("#F5F7FA")
+
+    # ── Mutual nomination highlight (drawn first, behind category edges) ──────
+    if mutual_pairs:
+        mutual_edgelist = [
+            (u, v) for u, v in graph.edges()
+            if frozenset([u, v]) in mutual_pairs
+        ]
+        if mutual_edgelist:
+            nx.draw_networkx_edges(
+                graph, layout,
+                edgelist=mutual_edgelist,
+                edge_color="#7C3AED",
+                arrowstyle="-|>",
+                arrowsize=0,
+                width=6,
+                connectionstyle="arc3,rad=0.0",
+                ax=ax,
+                alpha=0.35,
+            )
+
     nx.draw_networkx_nodes(
         graph, layout,
         node_size=sizes,
-        node_color=node_colors,
+        node_color=draw_colors,
         edgecolors="black",
         linewidths=1,
         ax=ax,
@@ -569,6 +626,8 @@ def _draw_sociogram(graph, layout, cats_to_draw, node_colors, title):
         )
     nx.draw_networkx_labels(graph, layout, font_size=10, ax=ax)
     legend_handles = [Patch(facecolor=categories[cat], label=cat) for cat in cats_to_draw]
+    if mutual_pairs:
+        legend_handles.append(Patch(facecolor="#7C3AED", label="Mutual", alpha=0.5))
     ax.legend(handles=legend_handles, title="Nomination Type", loc="lower left")
     ax.set_title(title, fontsize=16, color="#002664", fontweight="bold")
     ax.axis("off")
@@ -584,23 +643,68 @@ in_degrees = dict(G.in_degree())
 pos = _spring_layout(tuple(edges))
 overview_colors = ["lightgray"] * len(G.nodes())
 
+# Highlight student selector
+all_students_sorted = sorted(G_filtered.nodes())
+hl_col, _ = st.columns([3, 5])
+with hl_col:
+    highlight_student = st.selectbox(
+        "Highlight student",
+        options=["None"] + all_students_sorted,
+        help="Enlarges the selected student, highlights their connections, and fades everyone else.",
+    )
+highlight_student = None if highlight_student == "None" else highlight_student
+
+# Mutual pairs (computed once, used in both tabs)
+if show_mutual and G_filtered.number_of_edges() > 0:
+    outgoing = {(u, v) for u, v, cat in edges if cat in selected_categories}
+    mutual_pairs = frozenset(
+        frozenset([u, v]) for (u, v) in outgoing if (v, u) in outgoing
+    )
+else:
+    mutual_pairs = None
+
 tab_overview, tab_filtered = st.tabs(["Overview", "Filtered view"])
 
 with tab_overview:
-    st.pyplot(_draw_sociogram(G, pos, list(categories.keys()), overview_colors, "All nominations"))
+    fig_overview = _draw_sociogram(
+        G, pos, list(categories.keys()), overview_colors, "All nominations",
+        highlight_student=highlight_student,
+        mutual_pairs=mutual_pairs,
+    )
+    st.pyplot(fig_overview)
+    buf = io.BytesIO()
+    fig_overview.savefig(buf, format="png", dpi=150, bbox_inches="tight")
+    buf.seek(0)
+    st.download_button(
+        "Download as PNG", data=buf,
+        file_name="sociogram_overview.png", mime="image/png",
+    )
+    plt.close(fig_overview)
 
 with tab_filtered:
-    st.pyplot(_draw_sociogram(G_filtered, pos, selected_categories, node_colors, "Filtered by selected types"))
+    fig_filtered = _draw_sociogram(
+        G_filtered, pos, selected_categories, node_colors, "Filtered by selected types",
+        highlight_student=highlight_student,
+        mutual_pairs=mutual_pairs,
+    )
+    st.pyplot(fig_filtered)
+    buf = io.BytesIO()
+    fig_filtered.savefig(buf, format="png", dpi=150, bbox_inches="tight")
+    buf.seek(0)
+    st.download_button(
+        "Download as PNG", data=buf,
+        file_name="sociogram_filtered.png", mime="image/png",
+    )
+    plt.close(fig_filtered)
 
 # ─── Student detail panel ─────────────────────────────────────────────────────
 
 st.markdown("---")
 st.subheader("Student detail")
 
-all_students = sorted(G_filtered.nodes())
 selected_student = st.selectbox(
     "Select a student to see their nomination profile",
-    options=["— select a student —"] + all_students,
+    options=["— select a student —"] + all_students_sorted,
     label_visibility="collapsed",
 )
 
