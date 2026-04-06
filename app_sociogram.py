@@ -475,6 +475,88 @@ with tab_overview:
 with tab_filtered:
     st.pyplot(_draw_sociogram(G_filtered, pos, selected_categories, node_colors, "Filtered by selected types"))
 
+# ─── Student detail panel ─────────────────────────────────────────────────────
+
+st.markdown("---")
+st.subheader("Student detail")
+
+all_students = sorted(G_filtered.nodes())
+selected_student = st.selectbox(
+    "Select a student to see their nomination profile",
+    options=["— select a student —"] + all_students,
+    label_visibility="collapsed",
+)
+
+if selected_student != "— select a student —":
+    # Incoming: who nominated this student
+    received = {}
+    for src, tgt, cat in edges:
+        if tgt == selected_student and cat in selected_categories:
+            received.setdefault(cat, []).append(src)
+
+    # Outgoing: who this student nominated
+    gave = {}
+    for src, tgt, cat in edges:
+        if src == selected_student and cat in selected_categories:
+            gave.setdefault(cat, []).append(tgt)
+
+    # Betweenness score
+    if G_filtered.number_of_edges() > 0:
+        betweenness = nx.betweenness_centrality(G_filtered.to_undirected())
+        b_score = betweenness.get(selected_student, 0.0)
+    else:
+        b_score = 0.0
+
+    total_received = sum(len(v) for v in received.values())
+
+    st.markdown(f"""
+    <div style="
+        background:#fff;border:1px solid #D7DCE0;border-radius:8px;
+        padding:1.25rem 1.5rem;margin-bottom:1rem;
+    ">
+        <div style="font-size:1.2rem;font-weight:700;color:#002664;margin-bottom:0.25rem;">
+            {selected_student}
+        </div>
+        <div style="color:#555;font-size:0.85rem;">
+            {total_received} nomination{'s' if total_received != 1 else ''} received
+            &nbsp;·&nbsp;
+            Bridge score: {b_score:.2f}
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
+
+    col_recv, col_gave = st.columns(2)
+
+    with col_recv:
+        st.markdown("**Nominated by**")
+        if received:
+            for cat in selected_categories:
+                nominators = received.get(cat, [])
+                if nominators:
+                    color = categories[cat]
+                    st.markdown(
+                        f"<span style='color:{color};font-weight:600;'>{cat}</span>: "
+                        + ", ".join(nominators),
+                        unsafe_allow_html=True,
+                    )
+        else:
+            st.caption("Not nominated by anyone in the selected categories.")
+
+    with col_gave:
+        st.markdown("**Nominated**")
+        if gave:
+            for cat in selected_categories:
+                nominees = gave.get(cat, [])
+                if nominees:
+                    color = categories[cat]
+                    st.markdown(
+                        f"<span style='color:{color};font-weight:600;'>{cat}</span>: "
+                        + ", ".join(nominees),
+                        unsafe_allow_html=True,
+                    )
+        else:
+            st.caption("Did not nominate anyone in the selected categories.")
+
 # ─── Nomination summary ────────────────────────────────────────────────────────
 
 summary_counts = {
